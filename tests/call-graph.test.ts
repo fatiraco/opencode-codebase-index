@@ -48,6 +48,19 @@ describe("call-graph", () => {
           expect(createCall!.callType).toBe("MethodCall");
         });
 
+        it("should detect method calls using zero-allocation approach", () => {
+          const content = fs.readFileSync(path.join(fixturesDir, "php-method-zeroalloc.php"), "utf-8");
+          const calls = extractCalls(content, "php");
+
+          // Check that method calls are correctly identified without using parent() on callee.name
+          const methodCalls = calls.filter((c) => c.callType === "MethodCall");
+          expect(methodCalls.length).toBeGreaterThan(0);
+
+          // Verify specific method call patterns
+          expect(methodCalls.some(c => c.calleeName === "process")).toBe(true);
+          expect(methodCalls.some(c => c.calleeName === "validate")).toBe(true);
+        });
+
     it("should extract method calls", () => {
       const content = fs.readFileSync(path.join(fixturesDir, "method-calls.ts"), "utf-8");
       const calls = extractCalls(content, "typescript");

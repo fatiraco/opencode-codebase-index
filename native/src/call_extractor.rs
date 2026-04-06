@@ -38,9 +38,6 @@ pub fn extract_calls(content: &str, language_name: &str) -> Result<Vec<CallSite>
         .set_language(&ts_language)
         .map_err(|e| anyhow!("Failed to set language: {}", e))?;
 
-    // Set a timeout to prevent infinite parsing loops
-    parser.set_timeout_micros(5_000_000); // 5 seconds timeout
-
     let tree = parser
         .parse(content, None)
         .ok_or_else(|| anyhow!("Parse failed"))?;
@@ -63,30 +60,14 @@ pub fn extract_calls(content: &str, language_name: &str) -> Result<Vec<CallSite>
     let query = Query::new(&ts_language, query_source)
         .map_err(|e| anyhow!("Failed to compile query: {}", e))?;
 
-    // Disable query analysis that causes the crash (tree-sitter bug with analysis_state__compare_position)
     let callee_name_idx = query.capture_index_for_name("callee.name");
     let call_idx = query.capture_index_for_name("call");
+    let method_call_idx = query.capture_index_for_name("method.call");
+    let static_call_idx = query.capture_index_for_name("static.call");
     let constructor_idx = query.capture_index_for_name("constructor");
     let import_name_idx = query.capture_index_for_name("import.name");
     let import_default_idx = query.capture_index_for_name("import.default");
     let import_namespace_idx = query.capture_index_for_name("import.namespace");
-
-    let method_parent_kinds: &[&str] = match language {
-        Language::TypeScript
-        | Language::TypeScriptTsx
-        | Language::JavaScript
-        | Language::JavaScriptJsx => &["member_expression"],
-        Language::Python => &["attribute"],
-        Language::Rust => &["field_expression"],
-        Language::Go => &["selector_expression"],
-        Language::Php => &[
-            "member_call_expression",
-            "scoped_call_expression",
-            "nullsafe_member_call_expression",
-        ],
-        _ => &[],
-    };
-    let _method_parent_kinds = method_parent_kinds;
 
     let mut cursor = QueryCursor::new();
     let mut calls = Vec::new();
@@ -114,8 +95,31 @@ pub fn extract_calls(content: &str, language_name: &str) -> Result<Vec<CallSite>
             }
 
             if let Some(idx) = call_idx {
+                if capture.index == idx {
+                    // Check if this is actually a method call by looking at other captures
+                    // If method_call_idx or static_call_idx also matches, it's a method call
+                    let is_method_call = match_.captures.iter().any(|c| {
+                        method_call_idx.map(|idx| c.index == idx).unwrap_or(false)
+                            || static_call_idx.map(|idx| c.index == idx).unwrap_or(false)
+                    });
+
+                    if is_method_call {
+                        call_type = Some(CallType::MethodCall);
+                    } else {
+                        call_type = Some(CallType::Call);
+                    }
+                }
+            }
+
+            if let Some(idx) = method_call_idx {
                 if capture.index == idx && call_type.is_none() {
-                    call_type = Some(CallType::Call);
+                    call_type = Some(CallType::MethodCall);
+                }
+            }
+
+            if let Some(idx) = static_call_idx {
+                if capture.index == idx && call_type.is_none() {
+                    call_type = Some(CallType::MethodCall);
                 }
             }
 
@@ -153,49 +157,35 @@ pub fn extract_calls(content: &str, language_name: &str) -> Result<Vec<CallSite>
             }
         }
 
-        // Safely detect method calls by checking the callee node's parent
-        // instead of using query analysis which triggers tree-sitter bug
-        // The callee.name node is a property_identifier for method calls,
-        // and its parent is member_expression/attribute/etc.
+        // Safely detect method calls using query context analysis
+        // For PHP: check if the call is wrapped in a method call pattern
         if let (Some(name), Some(CallType::Call), Some(pos)) = (&callee_name, call_type, position) {
-            // Find the callee.name capture node
-            let callee_name_node = match_
-                .captures
-                .iter()
-                .find(|c| callee_name_idx.map(|idx| c.index == idx).unwrap_or(false))
-                .map(|c| c.node);
-
             let is_method_call = match language {
                 Language::TypeScript
                 | Language::TypeScriptTsx
                 | Language::JavaScript
-                | Language::JavaScriptJsx => callee_name_node
-                    .and_then(|n| n.parent())
-                    .map(|p| p.kind() == "member_expression")
-                    .unwrap_or(false),
-                Language::Python => callee_name_node
-                    .and_then(|n| n.parent())
-                    .map(|p| p.kind() == "attribute")
-                    .unwrap_or(false),
-                Language::Rust => callee_name_node
-                    .and_then(|n| n.parent())
-                    .map(|p| p.kind() == "field_expression")
-                    .unwrap_or(false),
-                Language::Go => callee_name_node
-                    .and_then(|n| n.parent())
-                    .map(|p| p.kind() == "selector_expression")
-                    .unwrap_or(false),
-                Language::Php => callee_name_node
-                    .and_then(|n| n.parent())
-                    .map(|p| {
-                        matches!(
-                            p.kind(),
-                            "member_call_expression"
-                                | "scoped_call_expression"
-                                | "nullsafe_member_call_expression"
-                        )
-                    })
-                    .unwrap_or(false),
+                | Language::JavaScriptJsx => match_.captures.iter().any(|c| {
+                    callee_name_idx.map(|idx| c.index == idx).unwrap_or(false)
+                        && (c.node.kind() == "property_identifier" || c.node.kind() == "identifier")
+                }),
+                Language::Python => match_.captures.iter().any(|c| {
+                    callee_name_idx.map(|idx| c.index == idx).unwrap_or(false)
+                        && c.node.kind() == "identifier"
+                }),
+                Language::Rust => match_.captures.iter().any(|c| {
+                    callee_name_idx.map(|idx| c.index == idx).unwrap_or(false)
+                        && c.node.kind() == "field_identifier"
+                }),
+                Language::Go => match_.captures.iter().any(|c| {
+                    callee_name_idx.map(|idx| c.index == idx).unwrap_or(false)
+                        && c.node.kind() == "field_identifier"
+                }),
+                Language::Php => {
+                    // PHP method calls are already marked in query (@method.call, @static.call)
+                    // @call is only for direct function calls
+                    // So if we reach here with CallType::Call, it's definitely not a method call
+                    false
+                }
                 _ => false,
             };
 
