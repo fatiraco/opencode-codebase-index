@@ -49,6 +49,25 @@ export interface SearchConfig {
   contextLines: number;
 }
 
+export type RerankerProvider = "cohere" | "jina" | "custom";
+
+export interface RerankerConfig {
+  /** Whether to enable reranking. Default: false */
+  enabled: boolean;
+  /** Provider shortcut for hosted rerank APIs. Use 'custom' to provide only baseUrl. */
+  provider: RerankerProvider;
+  /** Model name for reranking */
+  model: string;
+  /** Base URL of the rerank API endpoint */
+  baseUrl: string;
+  /** API key for the rerank service */
+  apiKey?: string;
+  /** Number of top documents to rerank */
+  topN: number;
+  /** Request timeout in milliseconds */
+  timeoutMs: number;
+}
+
 export type LogLevel = "error" | "warn" | "info" | "debug";
 
 export interface DebugConfig {
@@ -81,21 +100,6 @@ export interface CustomProviderConfig {
   requestIntervalMs?: number;
   maxBatchSize?: number;
   max_batch_size?: number;
-}
-
-export interface RerankerConfig {
-  /** Whether to enable reranking. Default: false */
-  enabled: boolean;
-  /** Base URL of the rerank API endpoint (e.g. "https://api.siliconflow.cn/v1") */
-  baseUrl: string;
-  /** Model name for reranking (e.g. "BAAI/bge-reranker-v2-m3") */
-  model: string;
-  /** API key for the rerank service */
-  apiKey?: string;
-  /** Number of top documents to rerank. Default: 20 */
-  topN?: number;
-  /** Request timeout in milliseconds. Default: 30000 */
-  timeoutMs?: number;
 }
 
 export interface CodebaseIndexConfig {
@@ -164,6 +168,21 @@ function isValidFusionStrategy(value: unknown): value is SearchConfig["fusionStr
   return value === "weighted" || value === "rrf";
 }
 
+function isValidRerankerProvider(value: unknown): value is RerankerProvider {
+  return value === "cohere" || value === "jina" || value === "custom";
+}
+
+function getDefaultRerankerBaseUrl(provider: RerankerProvider): string {
+  switch (provider) {
+    case "cohere":
+      return "https://api.cohere.ai/v1";
+    case "jina":
+      return "https://api.jina.ai/v1";
+    case "custom":
+      return "";
+  }
+}
+
 function getDefaultDebugConfig(): DebugConfig {
   return {
     enabled: false,
@@ -174,16 +193,6 @@ function getDefaultDebugConfig(): DebugConfig {
     logGc: true,
     logBranch: true,
     metrics: true,
-  };
-}
-
-function getDefaultRerankerConfig(): RerankerConfig {
-  return {
-    enabled: false,
-    baseUrl: "https://api.siliconflow.cn/v1",
-    model: "BAAI/bge-reranker-v2-m3",
-    topN: 20,
-    timeoutMs: 30000,
   };
 }
 
@@ -282,17 +291,6 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     metrics: typeof rawDebug.metrics === "boolean" ? rawDebug.metrics : defaultDebug.metrics,
   };
 
-  const defaultReranker = getDefaultRerankerConfig();
-  const rawReranker = (input.reranker && typeof input.reranker === "object" ? input.reranker : {}) as Record<string, unknown>;
-  const reranker: RerankerConfig = {
-    enabled: typeof rawReranker.enabled === "boolean" ? rawReranker.enabled : defaultReranker.enabled,
-    baseUrl: typeof rawReranker.baseUrl === "string" ? rawReranker.baseUrl.trim().replace(/\/+$/, '') : defaultReranker.baseUrl,
-    model: typeof rawReranker.model === "string" ? rawReranker.model : defaultReranker.model,
-    apiKey: getResolvedString(rawReranker.apiKey, "$root.reranker.apiKey"),
-    topN: typeof rawReranker.topN === "number" ? Math.max(1, Math.min(200, Math.floor(rawReranker.topN))) : defaultReranker.topN,
-    timeoutMs: typeof rawReranker.timeoutMs === "number" ? Math.max(1000, rawReranker.timeoutMs) : defaultReranker.timeoutMs,
-  };
-
   const rawKnowledgeBases = input.knowledgeBases;
   const knowledgeBases: string[] = isStringArray(rawKnowledgeBases)
     ? rawKnowledgeBases.filter(p => typeof p === "string" && p.trim().length > 0).map(p => p.trim())
@@ -306,6 +304,7 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
   let embeddingProvider: EmbeddingProvider | 'custom' | 'auto';
   let embeddingModel: EmbeddingModelName | undefined = undefined;
   let customProvider: CustomProviderConfig | undefined = undefined;
+  let reranker: RerankerConfig | undefined = undefined;
   
   if (embeddingProviderValue === 'custom') {
     embeddingProvider = 'custom';
@@ -357,6 +356,39 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     }
   } else {
     embeddingProvider = 'auto';
+  }
+
+  const rawReranker = (input.reranker && typeof input.reranker === "object"
+    ? input.reranker
+    : {}) as Record<string, unknown>;
+  const rerankerEnabled = typeof rawReranker.enabled === "boolean" ? rawReranker.enabled : false;
+  if (rerankerEnabled) {
+    const provider = isValidRerankerProvider(rawReranker.provider) ? rawReranker.provider : "custom";
+    const model = getResolvedString(rawReranker.model, "$root.reranker.model");
+    if (!model || model.trim().length === 0) {
+      throw new Error("reranker is enabled but reranker.model is missing or invalid.");
+    }
+
+    const configuredBaseUrl = getResolvedString(rawReranker.baseUrl, "$root.reranker.baseUrl");
+    const baseUrl = configuredBaseUrl?.trim() || getDefaultRerankerBaseUrl(provider);
+    if (baseUrl.length === 0) {
+      throw new Error("reranker is enabled but reranker.baseUrl is missing or invalid for provider 'custom'.");
+    }
+
+    const apiKey = getResolvedString(rawReranker.apiKey, "$root.reranker.apiKey");
+    if ((provider === "cohere" || provider === "jina") && (!apiKey || apiKey.trim().length === 0)) {
+      throw new Error(`reranker provider '${provider}' requires reranker.apiKey when enabled.`);
+    }
+
+    reranker = {
+      enabled: true,
+      provider,
+      model: model.trim(),
+      baseUrl: baseUrl.replace(/\/+$/, ""),
+      apiKey: apiKey?.trim() || undefined,
+      topN: typeof rawReranker.topN === "number" ? Math.min(50, Math.max(1, Math.floor(rawReranker.topN))) : 15,
+      timeoutMs: typeof rawReranker.timeoutMs === "number" ? Math.max(1000, Math.floor(rawReranker.timeoutMs)) : 10000,
+    };
   }
 
   return {

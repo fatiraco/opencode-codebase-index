@@ -321,6 +321,75 @@ describe("config schema", () => {
       it("should handle non-object search", () => {
         expect(parseConfig({ search: "invalid" }).search.maxResults).toBe(20);
       });
+
+      it("should parse reranker config when enabled", () => {
+        const config = parseConfig({
+          reranker: {
+            enabled: true,
+            provider: "cohere",
+            model: "rerank-v3.5",
+            apiKey: "test-key",
+            topN: 12,
+            timeoutMs: 4000,
+          },
+        });
+
+        expect(config.reranker).toEqual({
+          enabled: true,
+          provider: "cohere",
+          model: "rerank-v3.5",
+          baseUrl: "https://api.cohere.ai/v1",
+          apiKey: "test-key",
+          topN: 12,
+          timeoutMs: 4000,
+        });
+      });
+
+      it("should require model for enabled reranker", () => {
+        expect(() => parseConfig({
+          reranker: {
+            enabled: true,
+            provider: "cohere",
+            apiKey: "test-key",
+          },
+        })).toThrow("reranker is enabled but reranker.model is missing or invalid.");
+      });
+
+      it("should require apiKey for hosted reranker providers", () => {
+        expect(() => parseConfig({
+          reranker: {
+            enabled: true,
+            provider: "jina",
+            model: "jina-reranker-v2-base-multilingual",
+          },
+        })).toThrow("reranker provider 'jina' requires reranker.apiKey when enabled.");
+      });
+
+      it("should require baseUrl for custom reranker provider", () => {
+        expect(() => parseConfig({
+          reranker: {
+            enabled: true,
+            provider: "custom",
+            model: "custom-reranker",
+          },
+        })).toThrow("reranker is enabled but reranker.baseUrl is missing or invalid for provider 'custom'.");
+      });
+
+      it("should clamp reranker topN and timeoutMs", () => {
+        const config = parseConfig({
+          reranker: {
+            enabled: true,
+            provider: "custom",
+            model: "custom-reranker",
+            baseUrl: "https://rerank.example/v1",
+            topN: 999,
+            timeoutMs: 100,
+          },
+        });
+
+        expect(config.reranker?.topN).toBe(50);
+        expect(config.reranker?.timeoutMs).toBe(1000);
+      });
     });
 
     describe("custom provider config", () => {
