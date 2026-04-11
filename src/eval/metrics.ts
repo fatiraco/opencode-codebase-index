@@ -156,6 +156,7 @@ export function buildPerQueryResult(
     reciprocalRankAt10: reciprocalRankAtK(deduped, relevantPaths, 10),
     ndcgAt10: ndcgAtK(deduped, relevantPaths, 10),
     failureBucket: classifyFailureBucket(query, results, k),
+    rawTop3DistinctRatio: distinctTopKRatio(results, 3),
     results: deduped,
   };
 
@@ -180,6 +181,7 @@ export function computeEvalMetrics(
     mrrAt10: 0,
     ndcgAt10: 0,
     distinctTop3Ratio: 0,
+    rawDistinctTop3Ratio: 0,
   };
 
   const failureBuckets: Record<FailureBucket, number> = {
@@ -199,6 +201,7 @@ export function computeEvalMetrics(
     sum.mrrAt10 += query.reciprocalRankAt10;
     sum.ndcgAt10 += query.ndcgAt10;
     sum.distinctTop3Ratio += distinctTopKRatio(query.results, 3);
+    sum.rawDistinctTop3Ratio += query.rawTop3DistinctRatio;
     if (query.failureBucket) {
       failureBuckets[query.failureBucket] += 1;
     }
@@ -214,6 +217,7 @@ export function computeEvalMetrics(
     mrrAt10: safeDiv(sum.mrrAt10),
     ndcgAt10: safeDiv(sum.ndcgAt10),
     distinctTop3Ratio: safeDiv(sum.distinctTop3Ratio),
+    rawDistinctTop3Ratio: safeDiv(sum.rawDistinctTop3Ratio),
     latencyMs: {
       p50: percentile(latencies, 0.5),
       p95: percentile(latencies, 0.95),

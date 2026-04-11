@@ -22,6 +22,7 @@ export function compareSummaries(current: EvalSummary, baseline: EvalSummary, ag
       mrrAt10: metricDelta(current.metrics.mrrAt10, baseline.metrics.mrrAt10),
       ndcgAt10: metricDelta(current.metrics.ndcgAt10, baseline.metrics.ndcgAt10),
       distinctTop3Ratio: metricDelta(current.metrics.distinctTop3Ratio, baseline.metrics.distinctTop3Ratio),
+      rawDistinctTop3Ratio: metricDelta(current.metrics.rawDistinctTop3Ratio, baseline.metrics.rawDistinctTop3Ratio),
       latencyP50Ms: metricDelta(current.metrics.latencyMs.p50, baseline.metrics.latencyMs.p50),
       latencyP95Ms: metricDelta(current.metrics.latencyMs.p95, baseline.metrics.latencyMs.p95),
       latencyP99Ms: metricDelta(current.metrics.latencyMs.p99, baseline.metrics.latencyMs.p99),

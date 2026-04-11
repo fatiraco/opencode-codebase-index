@@ -75,6 +75,7 @@ export function createSummaryMarkdown(
   lines.push(`| MRR@10 | ${summary.metrics.mrrAt10.toFixed(4)} |`);
   lines.push(`| nDCG@10 | ${summary.metrics.ndcgAt10.toFixed(4)} |`);
   lines.push(`| Distinct Top@3 | ${formatPct(summary.metrics.distinctTop3Ratio)} |`);
+  lines.push(`| Raw Distinct Top@3 | ${formatPct(summary.metrics.rawDistinctTop3Ratio)} |`);
   lines.push(`| Latency p50 | ${formatMs(summary.metrics.latencyMs.p50)} |`);
   lines.push(`| Latency p95 | ${formatMs(summary.metrics.latencyMs.p95)} |`);
   lines.push(`| Latency p99 | ${formatMs(summary.metrics.latencyMs.p99)} |`);
@@ -119,6 +120,9 @@ export function createSummaryMarkdown(
     );
     lines.push(
       `| Distinct Top@3 | ${formatPct(comparison.deltas.distinctTop3Ratio.baseline)} | ${formatPct(comparison.deltas.distinctTop3Ratio.current)} | ${signed(comparison.deltas.distinctTop3Ratio.absolute)} |`
+    );
+    lines.push(
+      `| Raw Distinct Top@3 | ${formatPct(comparison.deltas.rawDistinctTop3Ratio.baseline)} | ${formatPct(comparison.deltas.rawDistinctTop3Ratio.current)} | ${signed(comparison.deltas.rawDistinctTop3Ratio.absolute)} |`
     );
     lines.push(
       `| p95 latency (ms) | ${comparison.deltas.latencyP95Ms.baseline.toFixed(3)} | ${comparison.deltas.latencyP95Ms.current.toFixed(3)} | ${signed(comparison.deltas.latencyP95Ms.absolute, 3)} |`

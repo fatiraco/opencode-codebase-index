@@ -68,6 +68,7 @@ export interface PerQueryEvalResult {
   reciprocalRankAt10: number;
   ndcgAt10: number;
   failureBucket?: FailureBucket;
+  rawTop3DistinctRatio: number;
   results: EvalSearchResult[];
 }
 
@@ -79,6 +80,7 @@ export interface EvalMetrics {
   mrrAt10: number;
   ndcgAt10: number;
   distinctTop3Ratio: number;
+  rawDistinctTop3Ratio: number;
   latencyMs: {
     p50: number;
     p95: number;
@@ -125,6 +127,7 @@ export interface EvalComparison {
     mrrAt10: MetricDelta;
     ndcgAt10: MetricDelta;
     distinctTop3Ratio: MetricDelta;
+    rawDistinctTop3Ratio: MetricDelta;
     latencyP50Ms: MetricDelta;
     latencyP95Ms: MetricDelta;
     latencyP99Ms: MetricDelta;
