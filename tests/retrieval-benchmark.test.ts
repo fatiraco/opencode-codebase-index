@@ -23,6 +23,7 @@ interface BenchmarkArtifact {
   generatedAt: string;
   queryCount: number;
   hitAt5: number;
+  distinctTop3Ratio: number;
   medianMs: number;
   p95Ms: number;
 }
@@ -78,6 +79,26 @@ function computeHitAt5(queries: BenchmarkQuery[]): number {
   }
 
   return queries.length === 0 ? 0 : hits / queries.length;
+}
+
+function computeDistinctTop3Ratio(queries: BenchmarkQuery[]): number {
+  if (queries.length === 0) return 0;
+
+  let totalRatio = 0;
+  for (const q of queries) {
+    const ranked = rankHybridResults(q.query, q.semantic, q.keyword, {
+      fusionStrategy: "rrf",
+      rrfK: 60,
+      rerankTopN: 20,
+      limit: 10,
+      hybridWeight: 0.5,
+    });
+    const top3 = ranked.slice(0, 3);
+    const distinctFiles = new Set(top3.map((r) => r.metadata.filePath)).size;
+    totalRatio += distinctFiles / Math.max(1, top3.length);
+  }
+
+  return totalRatio / queries.length;
 }
 
 function runLatency(queries: BenchmarkQuery[]): { medianMs: number; p95Ms: number } {
@@ -187,16 +208,18 @@ function loadBaseline(): BenchmarkArtifact {
   const parsed = JSON.parse(raw) as Partial<BenchmarkArtifact>;
   if (
     typeof parsed.hitAt5 !== "number" ||
+    typeof parsed.distinctTop3Ratio !== "number" ||
     typeof parsed.medianMs !== "number" ||
     typeof parsed.p95Ms !== "number"
   ) {
-    throw new Error("retrieval-baseline.json is invalid: expected numeric hitAt5, medianMs, and p95Ms");
+    throw new Error("retrieval-baseline.json is invalid: expected numeric hitAt5, distinctTop3Ratio, medianMs, and p95Ms");
   }
 
   return {
     generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : new Date(0).toISOString(),
     queryCount: typeof parsed.queryCount === "number" ? parsed.queryCount : 0,
     hitAt5: parsed.hitAt5,
+    distinctTop3Ratio: parsed.distinctTop3Ratio,
     medianMs: parsed.medianMs,
     p95Ms: parsed.p95Ms,
   };
@@ -242,15 +265,31 @@ describe("retrieval benchmark", () => {
           { id: "k-doc", score: 10, metadata: meta("/repo/README.md", "find similar", "other") },
         ],
       },
+      {
+        query: "auth flow exploration",
+        expectedTop5: ["/repo/src/auth.ts", "/repo/src/session.ts"],
+        semantic: [
+          { id: "s-auth-1", score: 0.96, metadata: meta("/repo/src/auth.ts", "validateAuth") },
+          { id: "s-auth-2", score: 0.95, metadata: meta("/repo/src/auth.ts", "refreshAuth") },
+          { id: "s-session", score: 0.94, metadata: meta("/repo/src/session.ts", "loadSession") },
+        ],
+        keyword: [
+          { id: "s-auth-1", score: 25, metadata: meta("/repo/src/auth.ts", "validateAuth") },
+          { id: "s-auth-2", score: 24, metadata: meta("/repo/src/auth.ts", "refreshAuth") },
+          { id: "s-session", score: 10, metadata: meta("/repo/src/session.ts", "loadSession") },
+        ],
+      },
     ];
 
     const hitAt5 = computeHitAt5(queries);
+    const distinctTop3Ratio = computeDistinctTop3Ratio(queries);
     const latency = runLatency(queries);
 
     const candidate: BenchmarkArtifact = {
       generatedAt: new Date().toISOString(),
       queryCount: queries.length,
       hitAt5,
+      distinctTop3Ratio,
       medianMs: latency.medianMs,
       p95Ms: latency.p95Ms,
     };
@@ -261,6 +300,7 @@ describe("retrieval benchmark", () => {
     const baseline = loadBaseline();
 
     expect(candidate.hitAt5).toBeGreaterThanOrEqual(baseline.hitAt5);
+    expect(candidate.distinctTop3Ratio).toBeGreaterThanOrEqual(baseline.distinctTop3Ratio);
     const medianBudget = Math.max(
       baseline.medianMs * 1.15 + LATENCY_BUDGET_ABSOLUTE_JITTER_MS,
       LATENCY_BUDGET_MEDIAN_MIN_MS
