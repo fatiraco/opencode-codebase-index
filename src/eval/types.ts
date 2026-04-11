@@ -34,10 +34,12 @@ export interface EvalBudget {
   thresholds: {
     hitAt5MaxDrop?: number;
     mrrAt10MaxDrop?: number;
+    rawDistinctTop3RatioMaxDrop?: number;
     p95LatencyMaxMultiplier?: number;
     p95LatencyMaxAbsoluteMs?: number;
     minHitAt5?: number;
     minMrrAt10?: number;
+    minRawDistinctTop3Ratio?: number;
   };
 }
 

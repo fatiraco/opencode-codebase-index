@@ -195,6 +195,13 @@ export function parseBudget(raw: unknown, sourceLabel: string): EvalBudget {
         thresholds.mrrAt10MaxDrop === undefined
           ? undefined
           : asPositiveNumber(thresholds.mrrAt10MaxDrop, `${sourceLabel}.thresholds.mrrAt10MaxDrop`),
+      rawDistinctTop3RatioMaxDrop:
+        thresholds.rawDistinctTop3RatioMaxDrop === undefined
+          ? undefined
+          : asPositiveNumber(
+              thresholds.rawDistinctTop3RatioMaxDrop,
+              `${sourceLabel}.thresholds.rawDistinctTop3RatioMaxDrop`
+            ),
       p95LatencyMaxMultiplier:
         thresholds.p95LatencyMaxMultiplier === undefined
           ? undefined
@@ -217,6 +224,13 @@ export function parseBudget(raw: unknown, sourceLabel: string): EvalBudget {
         thresholds.minMrrAt10 === undefined
           ? undefined
           : asPositiveNumber(thresholds.minMrrAt10, `${sourceLabel}.thresholds.minMrrAt10`),
+      minRawDistinctTop3Ratio:
+        thresholds.minRawDistinctTop3Ratio === undefined
+          ? undefined
+          : asPositiveNumber(
+              thresholds.minRawDistinctTop3Ratio,
+              `${sourceLabel}.thresholds.minRawDistinctTop3Ratio`
+            ),
     },
   };
 }

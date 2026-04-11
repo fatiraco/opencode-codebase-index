@@ -24,6 +24,16 @@ export function evaluateBudgetGate(
     });
   }
 
+  if (
+    thresholds.minRawDistinctTop3Ratio !== undefined &&
+    summary.metrics.rawDistinctTop3Ratio < thresholds.minRawDistinctTop3Ratio
+  ) {
+    violations.push({
+      metric: "minRawDistinctTop3Ratio",
+      message: `Raw Distinct Top@3 ${summary.metrics.rawDistinctTop3Ratio.toFixed(4)} is below minimum ${thresholds.minRawDistinctTop3Ratio.toFixed(4)}`,
+    });
+  }
+
   if (comparison) {
     if (
       thresholds.hitAt5MaxDrop !== undefined &&
@@ -42,6 +52,16 @@ export function evaluateBudgetGate(
       violations.push({
         metric: "mrrAt10MaxDrop",
         message: `MRR@10 drop ${comparison.deltas.mrrAt10.absolute.toFixed(4)} exceeds allowed -${thresholds.mrrAt10MaxDrop.toFixed(4)}`,
+      });
+    }
+
+    if (
+      thresholds.rawDistinctTop3RatioMaxDrop !== undefined &&
+      comparison.deltas.rawDistinctTop3Ratio.absolute < -thresholds.rawDistinctTop3RatioMaxDrop
+    ) {
+      violations.push({
+        metric: "rawDistinctTop3RatioMaxDrop",
+        message: `Raw Distinct Top@3 drop ${comparison.deltas.rawDistinctTop3Ratio.absolute.toFixed(4)} exceeds allowed -${thresholds.rawDistinctTop3RatioMaxDrop.toFixed(4)}`,
       });
     }
 
