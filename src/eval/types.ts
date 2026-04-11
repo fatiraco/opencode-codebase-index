@@ -78,6 +78,7 @@ export interface EvalMetrics {
   hitAt10: number;
   mrrAt10: number;
   ndcgAt10: number;
+  distinctTop3Ratio: number;
   latencyMs: {
     p50: number;
     p95: number;
@@ -123,6 +124,7 @@ export interface EvalComparison {
     hitAt10: MetricDelta;
     mrrAt10: MetricDelta;
     ndcgAt10: MetricDelta;
+    distinctTop3Ratio: MetricDelta;
     latencyP50Ms: MetricDelta;
     latencyP95Ms: MetricDelta;
     latencyP99Ms: MetricDelta;

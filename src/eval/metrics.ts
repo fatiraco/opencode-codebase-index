@@ -39,6 +39,13 @@ function uniqueResultsByPath(results: PerQueryEvalResult["results"]): PerQueryEv
   return unique;
 }
 
+function distinctTopKRatio(results: PerQueryEvalResult["results"], k: number): number {
+  const top = results.slice(0, k);
+  if (top.length === 0) return 0;
+  const distinct = new Set(top.map((result) => normalizePath(result.filePath))).size;
+  return distinct / top.length;
+}
+
 export function pathMatchesExpected(actualPath: string, expectedPath: string): boolean {
   const actual = normalizePath(actualPath);
   const expected = normalizePath(expectedPath);
@@ -172,6 +179,7 @@ export function computeEvalMetrics(
     hitAt10: 0,
     mrrAt10: 0,
     ndcgAt10: 0,
+    distinctTop3Ratio: 0,
   };
 
   const failureBuckets: Record<FailureBucket, number> = {
@@ -190,6 +198,7 @@ export function computeEvalMetrics(
     if (query.hitAt10) sum.hitAt10 += 1;
     sum.mrrAt10 += query.reciprocalRankAt10;
     sum.ndcgAt10 += query.ndcgAt10;
+    sum.distinctTop3Ratio += distinctTopKRatio(query.results, 3);
     if (query.failureBucket) {
       failureBuckets[query.failureBucket] += 1;
     }
@@ -204,6 +213,7 @@ export function computeEvalMetrics(
     hitAt10: safeDiv(sum.hitAt10),
     mrrAt10: safeDiv(sum.mrrAt10),
     ndcgAt10: safeDiv(sum.ndcgAt10),
+    distinctTop3Ratio: safeDiv(sum.distinctTop3Ratio),
     latencyMs: {
       p50: percentile(latencies, 0.5),
       p95: percentile(latencies, 0.95),
