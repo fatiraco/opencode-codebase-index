@@ -214,4 +214,136 @@ export function rerankResults(query: string) { return rankHybridResults(query); 
     expect(withOverride[0]?.filePath).toContain("/app/indexer/index.ts");
     expect(withOverride[0]?.filePath).not.toContain("/README.md");
   });
+
+  it("keeps implementation results ahead of docs even when external reranker prefers docs for implementation intent", async () => {
+    fetchSpy.mockImplementation(async (url, init) => {
+      if (String(url).includes("/rerank")) {
+        return new Response(JSON.stringify({
+          results: [
+            { index: 0, relevance_score: 0.99 },
+            { index: 1, relevance_score: 0.5 },
+          ],
+        }), { status: 200 });
+      }
+
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string[] };
+      const texts = Array.isArray(body.input) ? body.input : [];
+      const data = texts.map((text) => {
+        let seed = 0;
+        for (const ch of text) {
+          seed = (seed * 31 + ch.charCodeAt(0)) % 1000;
+        }
+        const embedding = Array.from({ length: 8 }, (_, idx) => ((seed + idx * 17) % 997) / 997);
+        return { embedding };
+      });
+
+      return new Response(JSON.stringify({
+        data,
+        usage: { total_tokens: Math.max(1, texts.length * 8) },
+      }), { status: 200 });
+    });
+
+    const config = parseConfig({
+      embeddingProvider: "custom",
+      customProvider: {
+        baseUrl: "http://localhost:11434/v1",
+        model: "mock-embedding-model",
+        dimensions: 8,
+      },
+      reranker: {
+        enabled: true,
+        provider: "custom",
+        model: "mock-reranker",
+        baseUrl: "https://rerank.example/v1",
+        topN: 10,
+      },
+      indexing: {
+        watchFiles: false,
+      },
+      search: {
+        maxResults: 10,
+        minScore: 0,
+        fusionStrategy: "rrf",
+        rrfK: 60,
+        rerankTopN: 20,
+      },
+    });
+
+    const indexer = new Indexer(tempDir, config);
+    await indexer.index();
+
+    const results = await indexer.search("where is rankHybridResults implementation", 5, {
+      metadataOnly: true,
+      filterByBranch: false,
+    });
+
+    expect(results[0]?.filePath).toContain("/app/indexer/index.ts");
+    expect(results[0]?.filePath).not.toContain("/README.md");
+  });
+
+  it("keeps documentation results ahead of code when external reranker prefers code for doc intent", async () => {
+    fetchSpy.mockImplementation(async (url, init) => {
+      if (String(url).includes("/rerank")) {
+        return new Response(JSON.stringify({
+          results: [
+            { index: 1, relevance_score: 0.99 },
+            { index: 0, relevance_score: 0.4 },
+          ],
+        }), { status: 200 });
+      }
+
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string[] };
+      const texts = Array.isArray(body.input) ? body.input : [];
+      const data = texts.map((text) => {
+        let seed = 0;
+        for (const ch of text) {
+          seed = (seed * 31 + ch.charCodeAt(0)) % 1000;
+        }
+        const embedding = Array.from({ length: 8 }, (_, idx) => ((seed + idx * 17) % 997) / 997);
+        return { embedding };
+      });
+
+      return new Response(JSON.stringify({
+        data,
+        usage: { total_tokens: Math.max(1, texts.length * 8) },
+      }), { status: 200 });
+    });
+
+    const config = parseConfig({
+      embeddingProvider: "custom",
+      customProvider: {
+        baseUrl: "http://localhost:11434/v1",
+        model: "mock-embedding-model",
+        dimensions: 8,
+      },
+      reranker: {
+        enabled: true,
+        provider: "custom",
+        model: "mock-reranker",
+        baseUrl: "https://rerank.example/v1",
+        topN: 10,
+      },
+      indexing: {
+        watchFiles: false,
+      },
+      search: {
+        maxResults: 10,
+        minScore: 0,
+        fusionStrategy: "rrf",
+        rrfK: 60,
+        rerankTopN: 20,
+      },
+    });
+
+    const indexer = new Indexer(tempDir, config);
+    await indexer.index();
+
+    const results = await indexer.search("where is rankHybridResults documentation", 5, {
+      metadataOnly: true,
+      filterByBranch: false,
+    });
+
+    expect(results[0]?.filePath).toContain("/README.md");
+    expect(results[0]?.filePath).not.toContain("/app/indexer/index.ts");
+  });
 });
