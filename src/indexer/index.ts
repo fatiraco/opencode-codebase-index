@@ -888,68 +888,93 @@ export function rerankResults(
   }
 
   const shouldDiversify = !(preferSourcePaths && identifierHints.length > 0);
-  const diversifiedHead = shouldDiversify ? diversifyRerankedHead(head) : head;
+  const diversifiedHead = diversifyEntriesByFileAndSymbol(head, (entry) => entry.candidate, shouldDiversify);
 
   const tail = candidates.slice(topN);
   return [...diversifiedHead.map((entry) => entry.candidate), ...tail];
 }
 
-function diversifyRerankedHead<T extends {
-  candidate: RankedCandidate;
-  originalIndex: number;
-}>(head: T[]): T[] {
-  if (head.length <= 2) {
-    return head;
+function diversifyEntriesByFileAndSymbol<T>(
+  entries: T[],
+  getCandidate: (entry: T) => RankedCandidate,
+  enabled: boolean
+): T[] {
+  if (!enabled || entries.length <= 2) {
+    return entries;
   }
 
-  const seenFiles = new Set<string>();
-  const firstPass: T[] = [];
+  const groups = new Map<string, T[]>();
+  const groupOrder: string[] = [];
+
+  for (const entry of entries) {
+    const candidate = getCandidate(entry);
+    const filePath = candidate.metadata.filePath;
+    if (!groups.has(filePath)) {
+      groups.set(filePath, []);
+      groupOrder.push(filePath);
+    }
+    groups.get(filePath)?.push(entry);
+  }
+
+  const diversifiedGroups = groupOrder.map((filePath) => {
+    const group = groups.get(filePath) ?? [];
+    return diversifyGroupBySymbol(group, getCandidate);
+  });
+
+  const result: T[] = [];
+  let added = true;
+  let round = 0;
+  while (added) {
+    added = false;
+    for (const group of diversifiedGroups) {
+      const entry = group[round];
+      if (entry !== undefined) {
+        result.push(entry);
+        added = true;
+      }
+    }
+    round += 1;
+  }
+
+  return result;
+}
+
+function diversifyCandidatesByFile(candidates: RankedCandidate[], enabled: boolean): RankedCandidate[] {
+  return diversifyEntriesByFileAndSymbol(candidates, (candidate) => candidate, enabled);
+}
+
+function diversifyGroupBySymbol<T>(
+  entries: T[],
+  getCandidate: (entry: T) => RankedCandidate
+): T[] {
+  if (entries.length <= 2) {
+    return entries;
+  }
+
+  const seenKeys = new Set<string>();
+  const primary: T[] = [];
   const remainder: T[] = [];
 
-  for (const entry of head) {
-    const filePath = entry.candidate.metadata.filePath;
-    if (!seenFiles.has(filePath)) {
-      seenFiles.add(filePath);
-      firstPass.push(entry);
+  for (const entry of entries) {
+    const key = buildDiversityKey(getCandidate(entry).metadata);
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      primary.push(entry);
     } else {
       remainder.push(entry);
     }
   }
 
-  if (remainder.length === 0) {
-    return head;
-  }
-
-  return [...firstPass, ...remainder].sort((a, b) => {
-    const aPrimary = firstPass.includes(a) ? 1 : 0;
-    const bPrimary = firstPass.includes(b) ? 1 : 0;
-    if (aPrimary !== bPrimary) {
-      return bPrimary - aPrimary;
-    }
-    return a.originalIndex - b.originalIndex;
-  });
+  return [...primary, ...remainder];
 }
 
-function diversifyCandidatesByFile(candidates: RankedCandidate[], enabled: boolean): RankedCandidate[] {
-  if (!enabled || candidates.length <= 2) {
-    return candidates;
+function buildDiversityKey(metadata: ChunkMetadata): string {
+  const normalizedPath = metadata.filePath.toLowerCase();
+  const normalizedName = (metadata.name ?? "").trim().toLowerCase();
+  if (normalizedName.length > 0) {
+    return `${normalizedPath}#${normalizedName}`;
   }
-
-  const seenFiles = new Set<string>();
-  const primary: RankedCandidate[] = [];
-  const remainder: RankedCandidate[] = [];
-
-  for (const candidate of candidates) {
-    const filePath = candidate.metadata.filePath;
-    if (!seenFiles.has(filePath)) {
-      seenFiles.add(filePath);
-      primary.push(candidate);
-    } else {
-      remainder.push(candidate);
-    }
-  }
-
-  return [...primary, ...remainder];
+  return normalizedPath;
 }
 
 export function rankHybridResults(

@@ -117,6 +117,17 @@ describe("retrieval ranking", () => {
     expect(reranked.map((candidate) => candidate.id).slice(0, 2)).toEqual(["fileA-1", "fileB-1"]);
   });
 
+  it("treats same-symbol duplicates as lower priority before distinct symbols", () => {
+    const candidates: Candidate[] = [
+      { id: "same-symbol-1", score: 0.96, metadata: meta({ filePath: "/repo/src/auth.ts", name: "validateAuth", chunkType: "function" }) },
+      { id: "same-symbol-2", score: 0.95, metadata: meta({ filePath: "/repo/src/auth.ts", name: "validateAuth", chunkType: "function" }) },
+      { id: "different-symbol", score: 0.94, metadata: meta({ filePath: "/repo/src/auth.ts", name: "refreshAuth", chunkType: "function" }) },
+    ];
+
+    const reranked = rerankResults("auth flow", candidates, 10);
+    expect(reranked.map((candidate) => candidate.id).slice(0, 2)).toEqual(["same-symbol-1", "different-symbol"]);
+  });
+
   it("does not diversify away exact-definition ranking for identifier queries", () => {
     const candidates: Candidate[] = [
       { id: "target", score: 0.96, metadata: meta({ filePath: "/repo/src/auth.ts", name: "rankHybridResults", chunkType: "function" }) },
@@ -587,6 +598,58 @@ describe("retrieval ranking", () => {
     }).rerankCandidatesWithApi("auth flow", candidates);
 
     expect(reranked.map((candidate) => candidate.id).slice(0, 2)).toEqual(["fileA-1", "fileB"]);
+    globalThis.fetch = fetchSpy;
+  });
+
+  it("diversifies external reranker duplicates by symbol before repeating the same symbol", async () => {
+    const config = parseConfig({
+      embeddingProvider: "custom",
+      customProvider: {
+        baseUrl: "http://localhost:11434/v1",
+        model: "mock-embed",
+        dimensions: 8,
+      },
+      reranker: {
+        enabled: true,
+        provider: "custom",
+        model: "mock-reranker",
+        baseUrl: "https://rerank.example/v1",
+        topN: 3,
+      },
+    });
+    const indexer = new Indexer("/repo", config);
+
+    const authFile = createTempFile("src/auth.ts", "export function validateAuth() {\n  return true;\n}\nexport function refreshAuth() {\n  return false;\n}\n");
+
+    const fetchSpy = globalThis.fetch;
+    globalThis.fetch = (async (input) => {
+      if (String(input).includes("/rerank")) {
+        return new Response(JSON.stringify({
+          results: [
+            { index: 0, relevance_score: 0.99 },
+            { index: 1, relevance_score: 0.98 },
+            { index: 2, relevance_score: 0.4 },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: [{ embedding: Array.from({ length: 8 }, () => 0.1) }], usage: { total_tokens: 1 } }), { status: 200 });
+    }) as typeof fetch;
+
+    const candidates: Candidate[] = [
+      { id: "same-symbol-1", score: 0.95, metadata: meta({ filePath: authFile, name: "validateAuth", chunkType: "function", startLine: 1, endLine: 3 }) },
+      { id: "same-symbol-2", score: 0.94, metadata: meta({ filePath: authFile, name: "validateAuth", chunkType: "function", startLine: 1, endLine: 3 }) },
+      { id: "different-symbol", score: 0.93, metadata: meta({ filePath: authFile, name: "refreshAuth", chunkType: "function", startLine: 4, endLine: 6 }) },
+    ];
+
+    const reranked = await (indexer as unknown as {
+      rerankCandidatesWithApi(
+        query: string,
+        items: Candidate[],
+        options?: { definitionIntent?: boolean; hasIdentifierHints?: boolean }
+      ): Promise<Candidate[]>;
+    }).rerankCandidatesWithApi("auth flow", candidates);
+
+    expect(reranked.map((candidate) => candidate.id).slice(0, 2)).toEqual(["same-symbol-1", "different-symbol"]);
     globalThis.fetch = fetchSpy;
   });
 });
