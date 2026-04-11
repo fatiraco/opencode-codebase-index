@@ -121,7 +121,9 @@ describe("eval runner", () => {
     });
 
     expect(result.summary.queryCount).toBe(1);
+    expect(typeof result.summary.metrics.distinctTop3Ratio).toBe("number");
     expect(readFileSync(path.join(result.outputDir, "summary.json"), "utf-8")).toContain("\"metrics\"");
+    expect(readFileSync(path.join(result.outputDir, "summary.md"), "utf-8")).toContain("Distinct Top@3");
     expect(readFileSync(path.join(result.outputDir, "summary.md"), "utf-8")).toContain("# Evaluation Summary");
     expect(readFileSync(path.join(result.outputDir, "per-query.json"), "utf-8")).toContain("\"queries\"");
   });
@@ -152,6 +154,7 @@ describe("eval runner", () => {
     });
 
     expect(compareRun.comparison).toBeDefined();
+    expect(readFileSync(path.join(compareRun.outputDir, "compare.json"), "utf-8")).toContain("\"distinctTop3Ratio\"");
     expect(readFileSync(path.join(compareRun.outputDir, "compare.json"), "utf-8")).toContain("\"deltas\"");
   });
 

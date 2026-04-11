@@ -160,9 +160,50 @@ describe("eval metrics", () => {
     expect(metrics.hitAt1).toBe(0.5);
     expect(metrics.hitAt3).toBe(1);
     expect(metrics.mrrAt10).toBeCloseTo(0.75, 5);
+    expect(metrics.distinctTop3Ratio).toBe(1);
     expect(metrics.latencyMs.p50).toBeGreaterThan(0);
     expect(metrics.embedding.callCount).toBe(20);
     expect(metrics.embedding.estimatedCostUsd).toBeCloseTo(0.00002, 8);
+  });
+
+  it("tracks distinctTop3Ratio on per-query eval output", () => {
+    const queries: GoldenQuery[] = [query({ id: "q-dup" })];
+    const perQuery = [
+      buildPerQueryResult(
+        queries[0],
+        [
+          {
+            filePath: "/repo/src/indexer/index.ts",
+            startLine: 1,
+            endLine: 2,
+            score: 1,
+            chunkType: "function",
+            name: "rankHybridResults",
+          },
+          {
+            filePath: "/repo/src/indexer/index.ts",
+            startLine: 10,
+            endLine: 20,
+            score: 0.95,
+            chunkType: "function",
+            name: "rerankResults",
+          },
+          {
+            filePath: "/repo/src/tools/index.ts",
+            startLine: 1,
+            endLine: 2,
+            score: 0.9,
+            chunkType: "function",
+            name: "codebase_search",
+          },
+        ],
+        10,
+        10
+      ),
+    ];
+
+    const metrics = computeEvalMetrics(queries, perQuery, 0, 0, 0);
+    expect(metrics.distinctTop3Ratio).toBe(1);
   });
 
   it("uses deterministic percentile behavior for tiny samples", () => {
