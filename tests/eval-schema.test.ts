@@ -82,13 +82,17 @@ describe("eval schema", () => {
         thresholds: {
           hitAt5MaxDrop: 0.05,
           mrrAt10MaxDrop: 0.02,
+          rawDistinctTop3RatioMaxDrop: 0.1,
           p95LatencyMaxMultiplier: 1.5,
+          minRawDistinctTop3Ratio: 0.7,
         },
       },
       "budget.json"
     );
 
     expect(budget.thresholds.hitAt5MaxDrop).toBe(0.05);
+    expect(budget.thresholds.rawDistinctTop3RatioMaxDrop).toBe(0.1);
+    expect(budget.thresholds.minRawDistinctTop3Ratio).toBe(0.7);
     expect(budget.failOnMissingBaseline).toBe(true);
   });
 
@@ -98,7 +102,7 @@ describe("eval schema", () => {
         {
           name: "default",
           thresholds: {
-            hitAt5MaxDrop: "bad",
+            rawDistinctTop3RatioMaxDrop: "bad",
           },
         },
         "budget.json"

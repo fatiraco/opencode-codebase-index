@@ -25,6 +25,8 @@ function summary(p95: number): EvalSummary {
       hitAt10: 1,
       mrrAt10: 1,
       ndcgAt10: 1,
+      distinctTop3Ratio: 1,
+      rawDistinctTop3Ratio: 1,
       latencyMs: {
         p50: p95,
         p95,
@@ -59,6 +61,8 @@ function comparisonWithBaselineP95(baselineP95: number): EvalComparison {
       hitAt10: { current: 1, baseline: 1, absolute: 0, relativePct: 0 },
       mrrAt10: { current: 1, baseline: 1, absolute: 0, relativePct: 0 },
       ndcgAt10: { current: 1, baseline: 1, absolute: 0, relativePct: 0 },
+      distinctTop3Ratio: { current: 1, baseline: 1, absolute: 0, relativePct: 0 },
+      rawDistinctTop3Ratio: { current: 1, baseline: 1, absolute: 0, relativePct: 0 },
       latencyP50Ms: { current: 5, baseline: baselineP95, absolute: 5 - baselineP95, relativePct: 0 },
       latencyP95Ms: { current: 5, baseline: baselineP95, absolute: 5 - baselineP95, relativePct: 0 },
       latencyP99Ms: { current: 5, baseline: baselineP95, absolute: 5 - baselineP95, relativePct: 0 },
@@ -96,5 +100,65 @@ describe("eval budget gate", () => {
     const gate = evaluateBudgetGate(budget, summary(5), comparisonWithBaselineP95(0));
     expect(gate.passed).toBe(false);
     expect(gate.violations.some((v) => v.metric === "p95LatencyMaxAbsoluteMs")).toBe(true);
+  });
+
+  it("fails when raw distinct top3 ratio drops below minimum", () => {
+    const budget: EvalBudget = {
+      name: "default",
+      failOnMissingBaseline: true,
+      thresholds: {
+        minRawDistinctTop3Ratio: 0.9,
+      },
+    };
+
+    const gate = evaluateBudgetGate(
+      budget,
+      {
+        ...summary(5),
+        metrics: {
+          ...summary(5).metrics,
+          rawDistinctTop3Ratio: 0.5,
+        },
+      }
+    );
+    expect(gate.passed).toBe(false);
+    expect(gate.violations.some((v) => v.metric === "minRawDistinctTop3Ratio")).toBe(true);
+  });
+
+  it("fails when raw distinct top3 ratio regresses beyond allowed drop", () => {
+    const budget: EvalBudget = {
+      name: "default",
+      failOnMissingBaseline: true,
+      thresholds: {
+        rawDistinctTop3RatioMaxDrop: 0.1,
+      },
+    };
+
+    const comparison: EvalComparison = {
+      ...comparisonWithBaselineP95(5),
+      deltas: {
+        ...comparisonWithBaselineP95(5).deltas,
+        rawDistinctTop3Ratio: {
+          current: 0.6,
+          baseline: 0.8,
+          absolute: -0.2,
+          relativePct: -25,
+        },
+      },
+    };
+
+    const gate = evaluateBudgetGate(
+      budget,
+      {
+        ...summary(5),
+        metrics: {
+          ...summary(5).metrics,
+          rawDistinctTop3Ratio: 0.6,
+        },
+      },
+      comparison
+    );
+    expect(gate.passed).toBe(false);
+    expect(gate.violations.some((v) => v.metric === "rawDistinctTop3RatioMaxDrop")).toBe(true);
   });
 });
