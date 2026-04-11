@@ -127,7 +127,7 @@ export type ParsedCodebaseIndexConfig = CodebaseIndexConfig & {
   indexing: IndexingConfig;
   search: SearchConfig;
   debug: DebugConfig;
-  reranker: RerankerConfig;
+  reranker?: RerankerConfig;
   knowledgeBases: string[];
   additionalInclude: string[];
 };
