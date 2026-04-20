@@ -1799,7 +1799,9 @@ mod tests {
         assert!(!embedding_exists(&conn, "hash").unwrap());
         assert!(get_chunk(&conn, "chunk1").unwrap().is_none());
         assert!(get_branch_chunk_ids(&conn, "main").unwrap().is_empty());
-        assert!(get_symbols_by_file(&conn, "src/main.ts").unwrap().is_empty());
+        assert!(get_symbols_by_file(&conn, "src/main.ts")
+            .unwrap()
+            .is_empty());
         assert!(get_branch_symbol_ids(&conn, "main").unwrap().is_empty());
         assert!(get_callees(&conn, "sym1", "main").unwrap().is_empty());
     }
