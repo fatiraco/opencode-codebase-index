@@ -13,6 +13,7 @@ describe("indexer clearIndex force rebuild", () => {
   let sourceFile: string;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
   let embeddingDimensions = 8;
+  let tempHome: string;
 
   beforeEach(() => {
     embeddingDimensions = 8;
@@ -43,6 +44,7 @@ describe("indexer clearIndex force rebuild", () => {
     });
 
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "clear-index-indexer-"));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "clear-index-home-"));
     fs.mkdirSync(path.join(tempDir, "src"), { recursive: true });
     sourceFile = path.join(tempDir, "src", "index.ts");
     fs.writeFileSync(
@@ -62,10 +64,12 @@ describe("indexer clearIndex force rebuild", () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
     fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(tempHome, { recursive: true, force: true });
   });
 
-  function createIndexer(dimensions: number): Indexer {
+  function createIndexer(projectRoot: string, dimensions: number, scope: "project" | "global" = "project"): Indexer {
     const config = parseConfig({
       embeddingProvider: "custom",
       customProvider: {
@@ -73,6 +77,7 @@ describe("indexer clearIndex force rebuild", () => {
         model: `mock-${dimensions}d`,
         dimensions,
       },
+      scope,
       indexing: {
         watchFiles: false,
         retries: 0,
@@ -80,12 +85,12 @@ describe("indexer clearIndex force rebuild", () => {
       },
     });
 
-    return new Indexer(tempDir, config);
+    return new Indexer(projectRoot, config);
   }
 
   it("clears persisted embeddings before a force rebuild with new dimensions", async () => {
     embeddingDimensions = 8;
-    const originalIndexer = createIndexer(8);
+    const originalIndexer = createIndexer(tempDir, 8);
     const originalStats = await originalIndexer.index();
     expect(originalStats.failedChunks).toBe(0);
     expect(originalStats.indexedChunks).toBeGreaterThan(0);
@@ -95,7 +100,7 @@ describe("indexer clearIndex force rebuild", () => {
     expect(seededDb.getStats().embeddingCount).toBeGreaterThan(0);
 
     embeddingDimensions = 4;
-    const rebuiltIndexer = createIndexer(4);
+    const rebuiltIndexer = createIndexer(tempDir, 4);
     await rebuiltIndexer.clearIndex();
 
     const clearedDb = new Database(dbPath);
@@ -118,5 +123,99 @@ describe("indexer clearIndex force rebuild", () => {
     expect(embeddingBuffer).not.toBeNull();
     const floatCount = embeddingBuffer!.byteLength / Float32Array.BYTES_PER_ELEMENT;
     expect(floatCount).toBe(4);
+  });
+
+  it("clears only the current project from a shared global index when compatibility is unchanged", async () => {
+    vi.stubEnv("HOME", tempHome);
+
+    const projectA = path.join(tempDir, "project-a");
+    const projectB = path.join(tempDir, "project-b");
+    const projectAFile = path.join(projectA, "src", "a.ts");
+    const projectBFile = path.join(projectB, "src", "b.ts");
+
+    fs.mkdirSync(path.dirname(projectAFile), { recursive: true });
+    fs.mkdirSync(path.dirname(projectBFile), { recursive: true });
+    fs.writeFileSync(projectAFile, "export function alpha() { return 'a'; }\n", "utf-8");
+    fs.writeFileSync(projectBFile, "export function beta() { return 'b'; }\n", "utf-8");
+
+    const indexerA = createIndexer(projectA, 8, "global");
+    const indexerB = createIndexer(projectB, 8, "global");
+
+    await indexerA.index();
+    await indexerB.index();
+
+    await indexerA.clearIndex();
+
+    const dbPath = path.join(tempHome, ".opencode", "global-index", "codebase.db");
+    const db = new Database(dbPath);
+    expect(db.getChunksByFile(projectAFile)).toHaveLength(0);
+    expect(db.getChunksByFile(projectBFile).length).toBeGreaterThan(0);
+
+    const remainingChunk = db.getChunksByFile(projectBFile)[0];
+    const remainingBranch = db.getAllBranches().find((branch) => branch.endsWith(":default"));
+    expect(remainingBranch).toBeTruthy();
+    expect(db.chunkExistsOnBranch(remainingBranch!, remainingChunk.chunkId)).toBe(true);
+    expect(db.getStats().embeddingCount).toBeGreaterThan(0);
+
+    const fileHashCachePath = path.join(tempHome, ".opencode", "global-index", "file-hashes.json");
+    const fileHashCache = JSON.parse(fs.readFileSync(fileHashCachePath, "utf-8")) as Record<string, string>;
+    expect(fileHashCache[projectAFile]).toBeUndefined();
+    expect(typeof fileHashCache[projectBFile]).toBe("string");
+  });
+
+  it("rejects an incompatible global force reset when the shared index contains other projects", async () => {
+    vi.stubEnv("HOME", tempHome);
+
+    const projectA = path.join(tempDir, "project-a");
+    const projectB = path.join(tempDir, "project-b");
+    const projectAFile = path.join(projectA, "src", "a.ts");
+    const projectBFile = path.join(projectB, "src", "b.ts");
+
+    fs.mkdirSync(path.dirname(projectAFile), { recursive: true });
+    fs.mkdirSync(path.dirname(projectBFile), { recursive: true });
+    fs.writeFileSync(projectAFile, "export function alpha() { return 'a'; }\n", "utf-8");
+    fs.writeFileSync(projectBFile, "export function beta() { return 'b'; }\n", "utf-8");
+
+    embeddingDimensions = 8;
+    await createIndexer(projectA, 8, "global").index();
+    await createIndexer(projectB, 8, "global").index();
+
+    embeddingDimensions = 4;
+    const incompatibleIndexer = createIndexer(projectA, 4, "global");
+
+    await expect(incompatibleIndexer.clearIndex()).rejects.toThrow(
+      "Global index compatibility reset is unsafe"
+    );
+
+    const dbPath = path.join(tempHome, ".opencode", "global-index", "codebase.db");
+    const db = new Database(dbPath);
+    expect(db.getChunksByFile(projectAFile).length).toBeGreaterThan(0);
+    expect(db.getChunksByFile(projectBFile).length).toBeGreaterThan(0);
+  });
+
+  it("allows an incompatible global force reset when the current project is the only indexed tenant", async () => {
+    vi.stubEnv("HOME", tempHome);
+
+    const projectA = path.join(tempDir, "project-a");
+    const projectAFile = path.join(projectA, "src", "a.ts");
+
+    fs.mkdirSync(path.dirname(projectAFile), { recursive: true });
+    fs.writeFileSync(projectAFile, "export function alpha() { return 'a'; }\n", "utf-8");
+
+    embeddingDimensions = 8;
+    await createIndexer(projectA, 8, "global").index();
+
+    embeddingDimensions = 4;
+    const rebuiltIndexer = createIndexer(projectA, 4, "global");
+    await rebuiltIndexer.clearIndex();
+
+    const dbPath = path.join(tempHome, ".opencode", "global-index", "codebase.db");
+    const db = new Database(dbPath);
+    expect(db.getStats().embeddingCount).toBe(0);
+    expect(db.getStats().chunkCount).toBe(0);
+
+    const rebuiltStats = await rebuiltIndexer.index();
+    expect(rebuiltStats.failedChunks).toBe(0);
+    expect(rebuiltStats.indexedChunks).toBeGreaterThan(0);
   });
 });
