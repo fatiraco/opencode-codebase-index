@@ -620,6 +620,32 @@ pub fn clear_branch(conn: &Connection, branch: &str) -> DbResult<usize> {
     Ok(count)
 }
 
+/// Return chunk IDs that are still referenced by any branch.
+pub fn get_referenced_chunk_ids(conn: &Connection, chunk_ids: &[String]) -> DbResult<Vec<String>> {
+    if chunk_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for chunk in chunk_ids.chunks(SQL_BIND_PARAM_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT DISTINCT chunk_id FROM branch_chunks WHERE chunk_id IN ({})",
+            placeholders
+        );
+        let params = rusqlite::params_from_iter(chunk.iter());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params, |row| row.get::<_, String>(0))?;
+        for row in rows {
+            results.push(row?);
+        }
+    }
+
+    Ok(results)
+}
+
 /// Remove branch catalog entries for specific chunk IDs.
 pub fn delete_branch_chunks_by_chunk_ids(
     conn: &Connection,
@@ -639,6 +665,34 @@ pub fn delete_branch_chunks_by_chunk_ids(
             placeholders
         );
         let params = rusqlite::params_from_iter(chunk.iter());
+        total += conn.execute(&sql, params)?;
+    }
+
+    Ok(total)
+}
+
+/// Remove branch catalog entries for specific chunk IDs on a specific branch.
+pub fn delete_branch_chunks_for_branch(
+    conn: &Connection,
+    branch: &str,
+    chunk_ids: &[String],
+) -> DbResult<usize> {
+    if chunk_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    for chunk in chunk_ids.chunks(SQL_BIND_PARAM_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "DELETE FROM branch_chunks WHERE branch = ? AND chunk_id IN ({})",
+            placeholders
+        );
+        let params = rusqlite::params_from_iter(
+            std::iter::once(branch).chain(chunk.iter().map(|s| s.as_str())),
+        );
         total += conn.execute(&sql, params)?;
     }
 
@@ -1238,6 +1292,35 @@ pub fn clear_branch_symbols(conn: &Connection, branch: &str) -> DbResult<usize> 
     Ok(count)
 }
 
+/// Return symbol IDs that are still referenced by any branch.
+pub fn get_referenced_symbol_ids(
+    conn: &Connection,
+    symbol_ids: &[String],
+) -> DbResult<Vec<String>> {
+    if symbol_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for chunk in symbol_ids.chunks(SQL_BIND_PARAM_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT DISTINCT symbol_id FROM branch_symbols WHERE symbol_id IN ({})",
+            placeholders
+        );
+        let params = rusqlite::params_from_iter(chunk.iter());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params, |row| row.get::<_, String>(0))?;
+        for row in rows {
+            results.push(row?);
+        }
+    }
+
+    Ok(results)
+}
+
 /// Remove branch-symbol catalog entries for specific symbol IDs.
 pub fn delete_branch_symbols_by_symbol_ids(
     conn: &Connection,
@@ -1257,6 +1340,34 @@ pub fn delete_branch_symbols_by_symbol_ids(
             placeholders
         );
         let params = rusqlite::params_from_iter(chunk.iter());
+        total += conn.execute(&sql, params)?;
+    }
+
+    Ok(total)
+}
+
+/// Remove branch-symbol catalog entries for specific symbol IDs on a specific branch.
+pub fn delete_branch_symbols_for_branch(
+    conn: &Connection,
+    branch: &str,
+    symbol_ids: &[String],
+) -> DbResult<usize> {
+    if symbol_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    for chunk in symbol_ids.chunks(SQL_BIND_PARAM_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "DELETE FROM branch_symbols WHERE branch = ? AND symbol_id IN ({})",
+            placeholders
+        );
+        let params = rusqlite::params_from_iter(
+            std::iter::once(branch).chain(chunk.iter().map(|s| s.as_str())),
+        );
         total += conn.execute(&sql, params)?;
     }
 

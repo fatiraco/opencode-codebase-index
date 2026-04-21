@@ -701,12 +701,22 @@ export class Database {
     return this.inner.deleteBranchChunksByChunkIds(chunkIds);
   }
 
+  deleteBranchChunksForBranch(branch: string, chunkIds: string[]): number {
+    if (chunkIds.length === 0) return 0;
+    return this.inner.deleteBranchChunksForBranch(branch, chunkIds);
+  }
+
   getBranchChunkIds(branch: string): string[] {
     return this.inner.getBranchChunkIds(branch);
   }
 
   getBranchDelta(branch: string, baseBranch: string): BranchDelta {
     return this.inner.getBranchDelta(branch, baseBranch);
+  }
+
+  getReferencedChunkIds(chunkIds: string[]): string[] {
+    if (chunkIds.length === 0) return [];
+    return this.inner.getReferencedChunkIds(chunkIds);
   }
 
   chunkExistsOnBranch(branch: string, chunkId: string): boolean {
@@ -831,9 +841,19 @@ export class Database {
     return this.inner.clearBranchSymbols(branch);
   }
 
+  getReferencedSymbolIds(symbolIds: string[]): string[] {
+    if (symbolIds.length === 0) return [];
+    return this.inner.getReferencedSymbolIds(symbolIds);
+  }
+
   deleteBranchSymbolsBySymbolIds(symbolIds: string[]): number {
     if (symbolIds.length === 0) return 0;
     return this.inner.deleteBranchSymbolsBySymbolIds(symbolIds);
+  }
+
+  deleteBranchSymbolsForBranch(branch: string, symbolIds: string[]): number {
+    if (symbolIds.length === 0) return 0;
+    return this.inner.deleteBranchSymbolsForBranch(branch, symbolIds);
   }
 
   // ── GC methods for symbols/edges ─────────────────────────────────

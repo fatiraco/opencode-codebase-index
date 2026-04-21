@@ -204,6 +204,7 @@ interface IndexCompatibility {
 
 const INDEX_METADATA_VERSION = "1";
 const RANKING_TOKEN_CACHE_LIMIT = 4096;
+const GLOBAL_BRANCH_KEY_VERSION = "2";
 
 function isPathWithinRoot(filePath: string, rootPath: string): boolean {
   const normalizedFilePath = path.resolve(filePath);
@@ -1509,6 +1510,25 @@ export class Indexer {
     return `${projectHash}:${branchName}`;
   }
 
+  private getLegacyBranchCatalogKey(): string {
+    return this.currentBranch || "default";
+  }
+
+  private getBranchCatalogKeys(): string[] {
+    const primary = this.getBranchCatalogKey();
+    if (this.config.scope !== "global") {
+      return [primary];
+    }
+
+    const version = this.database?.getMetadata("index.globalBranchKeyVersion");
+    if (version === GLOBAL_BRANCH_KEY_VERSION) {
+      return [primary];
+    }
+
+    const legacy = this.getLegacyBranchCatalogKey();
+    return primary === legacy ? [primary] : [primary, legacy];
+  }
+
   private isFileInCurrentScope(filePath: string, roots: string[]): boolean {
     return roots.some((root) => isPathWithinRoot(filePath, root));
   }
@@ -1585,7 +1605,8 @@ export class Indexer {
       invertedIndex.removeChunk(chunkId);
     }
 
-    database.deleteBranchChunksByChunkIds(removedChunkIds);
+    database.deleteBranchChunksForBranch(this.getBranchCatalogKey(), removedChunkIds);
+    const sharedChunkIds = new Set(database.getReferencedChunkIds(removedChunkIds));
 
     const symbolIds: string[] = [];
     for (const filePath of filePaths) {
@@ -1595,12 +1616,21 @@ export class Indexer {
     }
 
     database.clearCallEdgeTargetsForSymbols(symbolIds);
-    database.deleteBranchSymbolsBySymbolIds(symbolIds);
+    database.deleteBranchSymbolsForBranch(this.getBranchCatalogKey(), symbolIds);
+    const sharedSymbolIds = new Set(database.getReferencedSymbolIds(symbolIds));
 
     for (const filePath of filePaths) {
-      database.deleteCallEdgesByFile(filePath);
-      database.deleteSymbolsByFile(filePath);
-      database.deleteChunksByFile(filePath);
+      const fileChunkIds = database.getChunksByFile(filePath).map((chunk) => chunk.chunkId);
+      const fileSymbols = database.getSymbolsByFile(filePath);
+
+      if (fileChunkIds.every((chunkId) => !sharedChunkIds.has(chunkId))) {
+        database.deleteChunksByFile(filePath);
+      }
+
+      if (fileSymbols.every((symbol) => !sharedSymbolIds.has(symbol.id))) {
+        database.deleteCallEdgesByFile(filePath);
+        database.deleteSymbolsByFile(filePath);
+      }
     }
 
     database.gcOrphanCallEdges();
@@ -2116,6 +2146,9 @@ export class Indexer {
     this.database.setMetadata("index.embeddingProvider", provider.provider);
     this.database.setMetadata("index.embeddingModel", provider.modelInfo.model);
     this.database.setMetadata("index.embeddingDimensions", provider.modelInfo.dimensions.toString());
+    if (this.config.scope === "global") {
+      this.database.setMetadata("index.globalBranchKeyVersion", GLOBAL_BRANCH_KEY_VERSION);
+    }
     this.database.setMetadata("index.updatedAt", now);
 
     if (!existingCreatedAt) {
@@ -2942,7 +2975,9 @@ export class Indexer {
 
     let branchChunkIds: Set<string> | null = null;
     if (filterByBranch && (this.config.scope === "global" || this.currentBranch !== "default")) {
-      branchChunkIds = new Set(database.getBranchChunkIds(this.getBranchCatalogKey()));
+      branchChunkIds = new Set(
+        this.getBranchCatalogKeys().flatMap((branchKey) => database.getBranchChunkIds(branchKey))
+      );
     }
 
     const prefilterStartTime = performance.now();
@@ -3208,6 +3243,7 @@ export class Indexer {
         database.deleteMetadata("index.embeddingProvider");
         database.deleteMetadata("index.embeddingModel");
         database.deleteMetadata("index.embeddingDimensions");
+        database.deleteMetadata("index.globalBranchKeyVersion");
         database.deleteMetadata("index.createdAt");
         database.deleteMetadata("index.updatedAt");
 
@@ -3242,6 +3278,7 @@ export class Indexer {
     database.deleteMetadata("index.embeddingProvider");
     database.deleteMetadata("index.embeddingModel");
     database.deleteMetadata("index.embeddingDimensions");
+    database.deleteMetadata("index.globalBranchKeyVersion");
     database.deleteMetadata("index.createdAt");
     database.deleteMetadata("index.updatedAt");
 
@@ -3451,7 +3488,9 @@ export class Indexer {
 
     let branchChunkIds: Set<string> | null = null;
     if (filterByBranch && (this.config.scope === "global" || this.currentBranch !== "default")) {
-      branchChunkIds = new Set(database.getBranchChunkIds(this.getBranchCatalogKey()));
+      branchChunkIds = new Set(
+        this.getBranchCatalogKeys().flatMap((branchKey) => database.getBranchChunkIds(branchKey))
+      );
     }
 
     const prefilterStartTime = performance.now();
@@ -3559,11 +3598,35 @@ export class Indexer {
 
   async getCallers(targetName: string): Promise<CallEdgeData[]> {
     const { database } = await this.ensureInitialized();
-    return database.getCallersWithContext(targetName, this.getBranchCatalogKey());
+    const seen = new Set<string>();
+    const results: CallEdgeData[] = [];
+
+    for (const branchKey of this.getBranchCatalogKeys()) {
+      for (const edge of database.getCallersWithContext(targetName, branchKey)) {
+        if (!seen.has(edge.id)) {
+          seen.add(edge.id);
+          results.push(edge);
+        }
+      }
+    }
+
+    return results;
   }
 
   async getCallees(symbolId: string): Promise<CallEdgeData[]> {
     const { database } = await this.ensureInitialized();
-    return database.getCallees(symbolId, this.getBranchCatalogKey());
+    const seen = new Set<string>();
+    const results: CallEdgeData[] = [];
+
+    for (const branchKey of this.getBranchCatalogKeys()) {
+      for (const edge of database.getCallees(symbolId, branchKey)) {
+        if (!seen.has(edge.id)) {
+          seen.add(edge.id);
+          results.push(edge);
+        }
+      }
+    }
+
+    return results;
   }
 }
