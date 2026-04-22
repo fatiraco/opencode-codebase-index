@@ -158,4 +158,46 @@ describe("knowledge base tool config refresh", () => {
     expect(indexerInstances.at(-1)?.projectRoot).toBe(worktreeDir);
     expect(indexerInstances.at(-1)?.config.knowledgeBases).toEqual([path.normalize(kbDir)]);
   });
+
+  it("preserves inherited relative config paths when saving back to the source config", async () => {
+    const mainRepoDir = path.join(tempDir, "main-repo");
+    const worktreeDir = path.join(tempDir, "worktree-feature");
+    const worktreeGitDir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+
+    fs.mkdirSync(path.join(mainRepoDir, ".git", "refs", "heads"), { recursive: true });
+    fs.mkdirSync(path.join(mainRepoDir, ".opencode"), { recursive: true });
+    fs.mkdirSync(path.join(mainRepoDir, "docs", "reference"), { recursive: true });
+    fs.mkdirSync(worktreeGitDir, { recursive: true });
+    fs.mkdirSync(worktreeDir, { recursive: true });
+
+    fs.writeFileSync(path.join(mainRepoDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(mainRepoDir, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n");
+    fs.writeFileSync(path.join(worktreeDir, ".git"), `gitdir: ${worktreeGitDir}\n`);
+    fs.writeFileSync(path.join(worktreeGitDir, "HEAD"), "ref: refs/heads/feature\n");
+    fs.writeFileSync(path.join(worktreeGitDir, "commondir"), "../..\n");
+
+    const mainConfigPath = path.join(mainRepoDir, ".opencode", "codebase-index.json");
+    fs.writeFileSync(
+      mainConfigPath,
+      JSON.stringify({
+        embeddingProvider: "custom",
+        customProvider: {
+          baseUrl: "http://localhost:11434/v1",
+          model: "mock-model",
+          dimensions: 8,
+        },
+        indexing: { watchFiles: false },
+        knowledgeBases: ["docs/reference"],
+      }, null, 2),
+      "utf-8"
+    );
+
+    indexerInstances.length = 0;
+    initializeTools(worktreeDir, parseConfig(loadMergedConfig(worktreeDir)));
+
+    await add_knowledge_base.execute({ path: kbDir });
+
+    const savedMainConfig = JSON.parse(fs.readFileSync(mainConfigPath, "utf-8")) as { knowledgeBases?: string[] };
+    expect(savedMainConfig.knowledgeBases).toEqual(["docs/reference", path.normalize(kbDir)]);
+  });
 });

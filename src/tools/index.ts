@@ -54,9 +54,38 @@ function getConfigPath(): string {
   return resolveProjectConfigPath(sharedProjectRoot);
 }
 
+function normalizeConfigPathValue(value: string, baseDir: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const absolutePath = path.isAbsolute(trimmed) ? trimmed : path.resolve(baseDir, trimmed);
+  return path.normalize(absolutePath);
+}
+
+function serializeConfigPathValue(value: string, baseDir: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (!path.isAbsolute(trimmed)) {
+    return path.normalize(trimmed);
+  }
+
+  const relativePath = path.relative(baseDir, trimmed);
+  if (!relativePath || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))) {
+    return path.normalize(relativePath || ".");
+  }
+
+  return path.normalize(trimmed);
+}
+
 function loadConfig(): Record<string, unknown> {
   const rawConfig = loadMergedConfig(sharedProjectRoot);
   const config: Record<string, unknown> = {};
+  const configBaseDir = path.dirname(path.dirname(getConfigPath()));
   
   if (rawConfig && typeof rawConfig === "object") {
     for (const key of Object.keys(rawConfig)) {
@@ -66,15 +95,13 @@ function loadConfig(): Record<string, unknown> {
   
   if (Array.isArray(config.knowledgeBases)) {
     config.knowledgeBases = (config.knowledgeBases as string[]).map(kb => {
-      const resolved = path.isAbsolute(kb) ? kb : path.resolve(sharedProjectRoot, kb);
-      return path.normalize(resolved);
+      return normalizeConfigPathValue(kb, configBaseDir);
     });
   }
   
   if (Array.isArray(config.additionalInclude)) {
     config.additionalInclude = (config.additionalInclude as string[]).map(pattern => {
-      const resolved = path.isAbsolute(pattern) ? pattern : path.resolve(sharedProjectRoot, pattern);
-      return path.normalize(resolved);
+      return normalizeConfigPathValue(pattern, configBaseDir);
     });
   }
   
@@ -84,10 +111,26 @@ function loadConfig(): Record<string, unknown> {
 function saveConfig(config: Record<string, unknown>): void {
   const configPath = getConfigPath();
   const configDir = path.dirname(configPath);
+  const configBaseDir = path.dirname(configDir);
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true });
   }
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+
+  const serializableConfig: Record<string, unknown> = { ...config };
+
+  if (Array.isArray(serializableConfig.knowledgeBases)) {
+    serializableConfig.knowledgeBases = (serializableConfig.knowledgeBases as string[]).map(kb =>
+      serializeConfigPathValue(kb, configBaseDir)
+    );
+  }
+
+  if (Array.isArray(serializableConfig.additionalInclude)) {
+    serializableConfig.additionalInclude = (serializableConfig.additionalInclude as string[]).map(pattern =>
+      serializeConfigPathValue(pattern, configBaseDir)
+    );
+  }
+
+  writeFileSync(configPath, JSON.stringify(serializableConfig, null, 2) + "\n", "utf-8");
 }
 
 export const codebase_peek: ToolDefinition = tool({
