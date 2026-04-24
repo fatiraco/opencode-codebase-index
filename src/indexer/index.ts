@@ -86,6 +86,14 @@ function isRateLimitError(error: unknown): boolean {
   return message.includes("429") || message.toLowerCase().includes("rate limit") || message.toLowerCase().includes("too many requests");
 }
 
+function isSqliteCorruptionError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("database disk image is malformed")
+    || message.includes("file is not a database")
+    || message.includes("database schema is corrupt")
+    || message.includes("sqlite_corrupt");
+}
+
 export interface IndexStats {
   totalFiles: number;
   totalChunks: number;
@@ -117,6 +125,8 @@ export interface HealthCheckResult {
   gcOrphanChunks: number;
   gcOrphanSymbols: number;
   gcOrphanCallEdges: number;
+  warning?: string;
+  resetCorruptedIndex?: boolean;
 }
 
 export interface StatusResult {
@@ -2037,8 +2047,19 @@ export class Indexer {
     }
 
     const dbPath = path.join(this.indexPath, "codebase.db");
-    const dbIsNew = !existsSync(dbPath);
-    this.database = new Database(dbPath);
+    let dbIsNew = !existsSync(dbPath);
+    try {
+      this.database = new Database(dbPath);
+    } catch (error) {
+      if (!(await this.tryResetCorruptedIndex("initializing index database", error))) {
+        throw error;
+      }
+
+      this.store = new VectorStore(storePath, dimensions);
+      this.invertedIndex = new InvertedIndex(invertedIndexPath);
+      this.database = new Database(dbPath);
+      dbIsNew = true;
+    }
 
     // Recover from interrupted indexing AFTER store, invertedIndex, and database
     // are all initialized. healthCheck() calls ensureInitialized() which checks
@@ -2112,10 +2133,79 @@ export class Indexer {
 
     const orphanCount = stats.embeddingCount - stats.chunkCount;
     if (orphanCount > this.config.indexing.gcOrphanThreshold) {
-      this.database.gcOrphanEmbeddings();
-      this.database.gcOrphanChunks();
+      try {
+        this.database.gcOrphanEmbeddings();
+        this.database.gcOrphanChunks();
+      } catch (error) {
+        if (await this.tryResetCorruptedIndex("running automatic orphan garbage collection", error)) {
+          return;
+        }
+        throw error;
+      }
       this.database.setMetadata("lastGcTimestamp", Date.now().toString());
     }
+  }
+
+  private getCorruptedIndexWarning(dbPath: string): string {
+    if (this.config.scope === "global") {
+      return `Detected a corrupted shared global SQLite index at ${dbPath}. Automatic repair is disabled for global scope because it may delete other projects' index data. Remove or repair the shared index manually, then rerun index_codebase with force=true.`;
+    }
+
+    return `Detected a corrupted local SQLite index at ${dbPath} and reset the local index. Run index_codebase to rebuild search data.`;
+  }
+
+  private async tryResetCorruptedIndex(stage: string, error: unknown): Promise<boolean> {
+    if (!isSqliteCorruptionError(error)) {
+      return false;
+    }
+
+    const dbPath = path.join(this.indexPath, "codebase.db");
+    const warning = this.getCorruptedIndexWarning(dbPath);
+    const errorMessage = getErrorMessage(error);
+
+    if (this.config.scope === "global") {
+      this.logger.error("Detected corrupted shared global index database", {
+        stage,
+        dbPath,
+        error: errorMessage,
+      });
+      throw new Error(`${warning} Original SQLite error: ${errorMessage}`);
+    }
+
+    this.logger.warn("Detected corrupted local index database, resetting local index", {
+      stage,
+      dbPath,
+      error: errorMessage,
+    });
+
+    this.store = null;
+    this.invertedIndex = null;
+    this.database = null;
+    this.indexCompatibility = null;
+    this.fileHashCache.clear();
+
+    const resetPaths = [
+      path.join(this.indexPath, "codebase.db"),
+      path.join(this.indexPath, "codebase.db-shm"),
+      path.join(this.indexPath, "codebase.db-wal"),
+      path.join(this.indexPath, "vectors.usearch"),
+      path.join(this.indexPath, "inverted-index.json"),
+      path.join(this.indexPath, "file-hashes.json"),
+      path.join(this.indexPath, "failed-batches.json"),
+      path.join(this.indexPath, "indexing.lock"),
+      path.join(this.indexPath, "vectors"),
+    ];
+
+    await Promise.all(resetPaths.map(async (targetPath) => {
+      try {
+        await fsPromises.rm(targetPath, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup. The follow-up reinitialization will recreate what it needs.
+      }
+    }));
+
+    await fsPromises.mkdir(this.indexPath, { recursive: true });
+    return true;
   }
 
   private migrateFromLegacyIndex(): void {
@@ -3356,10 +3446,34 @@ export class Indexer {
       invertedIndex.save();
     }
 
-    const gcOrphanEmbeddings = database.gcOrphanEmbeddings();
-    const gcOrphanChunks = database.gcOrphanChunks();
-    const gcOrphanSymbols = database.gcOrphanSymbols();
-    const gcOrphanCallEdges = database.gcOrphanCallEdges();
+    let gcOrphanEmbeddings: number;
+    let gcOrphanChunks: number;
+    let gcOrphanSymbols: number;
+    let gcOrphanCallEdges: number;
+
+    try {
+      gcOrphanEmbeddings = database.gcOrphanEmbeddings();
+      gcOrphanChunks = database.gcOrphanChunks();
+      gcOrphanSymbols = database.gcOrphanSymbols();
+      gcOrphanCallEdges = database.gcOrphanCallEdges();
+    } catch (error) {
+      if (!(await this.tryResetCorruptedIndex("running index health check", error))) {
+        throw error;
+      }
+
+      await this.ensureInitialized();
+
+      return {
+        removed: 0,
+        filePaths: [],
+        gcOrphanEmbeddings: 0,
+        gcOrphanChunks: 0,
+        gcOrphanSymbols: 0,
+        gcOrphanCallEdges: 0,
+        resetCorruptedIndex: true,
+        warning: this.getCorruptedIndexWarning(path.join(this.indexPath, "codebase.db")),
+      };
+    }
 
     this.logger.recordGc(removedCount, gcOrphanChunks, gcOrphanEmbeddings);
     this.logger.gc("info", "Health check complete", {

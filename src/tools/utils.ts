@@ -179,6 +179,10 @@ export function formatCodebasePeek(results: SearchResult[]): string {
 }
 
 export function formatHealthCheck(result: HealthCheckResult): string {
+  if (result.resetCorruptedIndex) {
+    return result.warning ?? "Detected a corrupted local index and reset it. Run index_codebase to rebuild search data.";
+  }
+
   if (result.removed === 0 && result.gcOrphanEmbeddings === 0 && result.gcOrphanChunks === 0 && result.gcOrphanSymbols === 0 && result.gcOrphanCallEdges === 0) {
     return "Index is healthy. No stale entries found.";
   }
