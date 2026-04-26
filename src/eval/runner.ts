@@ -7,7 +7,7 @@ import * as os from "os";
 import * as path from "path";
 import { performance } from "perf_hooks";
 
-import { resolveInheritedKnowledgeBaseEntries } from "../config/merger.js";
+import { rebasePathEntries, resolveInheritedKnowledgeBaseEntries } from "../config/merger.js";
 import { parseConfig } from "../config/schema.js";
 import type { SearchConfig as ConfigSearchConfig } from "../config/schema.js";
 import { getDefaultModelForProvider } from "../config/index.js";
@@ -41,15 +41,56 @@ function toAbsolute(projectRoot: string, maybeRelative: string): string {
   return path.isAbsolute(maybeRelative) ? maybeRelative : path.join(projectRoot, maybeRelative);
 }
 
+function isProjectScopedConfigPath(configPath: string): boolean {
+  return path.basename(configPath) === "codebase-index.json"
+    && path.basename(path.dirname(configPath)) === ".opencode";
+}
+
+function normalizeEvalConfigKnowledgeBases(
+  rawConfig: unknown,
+  projectRoot: string,
+  resolvedConfigPath: string,
+): Record<string, unknown> {
+  const config = rawConfig && typeof rawConfig === "object"
+    ? { ...(rawConfig as Record<string, unknown>) }
+    : {};
+
+  if (!Array.isArray(config.knowledgeBases)) {
+    return config;
+  }
+
+  config.knowledgeBases = isProjectScopedConfigPath(resolvedConfigPath)
+    ? resolveInheritedKnowledgeBaseEntries(
+        config.knowledgeBases,
+        path.dirname(path.dirname(resolvedConfigPath)),
+        projectRoot,
+      )
+    : rebasePathEntries(
+        config.knowledgeBases,
+        path.dirname(resolvedConfigPath),
+        projectRoot,
+      );
+
+  return config;
+}
+
 function loadRawConfig(projectRoot: string, configPath?: string): unknown {
   const fromPath = configPath ? toAbsolute(projectRoot, configPath) : null;
   if (fromPath && existsSync(fromPath)) {
-    return JSON.parse(readFileSync(fromPath, "utf-8"));
+    return normalizeEvalConfigKnowledgeBases(
+      JSON.parse(readFileSync(fromPath, "utf-8")),
+      projectRoot,
+      fromPath,
+    );
   }
 
   const projectConfig = resolveProjectConfigPath(projectRoot);
   if (existsSync(projectConfig)) {
-    return JSON.parse(readFileSync(projectConfig, "utf-8"));
+    return normalizeEvalConfigKnowledgeBases(
+      JSON.parse(readFileSync(projectConfig, "utf-8")),
+      projectRoot,
+      projectConfig,
+    );
   }
 
   const globalConfig = path.join(os.homedir(), ".config", "opencode", "codebase-index.json");
@@ -83,32 +124,28 @@ function clearIndexRoot(projectRoot: string, scope: "project" | "global"): void 
   }
 }
 
-function ensureLocalEvalProjectConfig(projectRoot: string, configPath?: string): void {
+function ensureLocalEvalProjectConfig(projectRoot: string, configPath?: string): string | undefined {
   const localConfigPath = getLocalProjectConfigPath(projectRoot);
   if (existsSync(localConfigPath)) {
-    return;
+    return localConfigPath;
   }
 
   const resolvedConfigPath = configPath
     ? toAbsolute(projectRoot, configPath)
     : resolveProjectConfigPath(projectRoot);
   if (!existsSync(resolvedConfigPath) || resolvedConfigPath === localConfigPath) {
-    return;
+    return resolvedConfigPath;
   }
 
-  const sourceConfig = JSON.parse(readFileSync(resolvedConfigPath, "utf-8")) as Record<string, unknown>;
-  const sourceConfigBaseDir = path.dirname(path.dirname(resolvedConfigPath));
-
-  if (Array.isArray(sourceConfig.knowledgeBases)) {
-    sourceConfig.knowledgeBases = resolveInheritedKnowledgeBaseEntries(
-      sourceConfig.knowledgeBases,
-      sourceConfigBaseDir,
-      projectRoot,
-    );
-  }
+  const sourceConfig = normalizeEvalConfigKnowledgeBases(
+    JSON.parse(readFileSync(resolvedConfigPath, "utf-8")),
+    projectRoot,
+    resolvedConfigPath,
+  );
 
   mkdirSync(path.dirname(localConfigPath), { recursive: true });
   writeFileSync(localConfigPath, JSON.stringify(sourceConfig, null, 2), "utf-8");
+  return localConfigPath;
 }
 
 function loadParsedConfig(projectRoot: string, configPath?: string) {
@@ -158,11 +195,11 @@ export async function runEvaluation(options: EvalRunOptions): Promise<EvalRunRes
 
   const dataset = loadGoldenDataset(datasetPath);
 
-  if (options.reindex) {
-    ensureLocalEvalProjectConfig(options.projectRoot, options.configPath);
-  }
+  const resolvedEvalConfigPath = options.reindex
+    ? ensureLocalEvalProjectConfig(options.projectRoot, options.configPath)
+    : options.configPath;
 
-  const parsedConfig = loadParsedConfig(options.projectRoot, options.configPath);
+  const parsedConfig = loadParsedConfig(options.projectRoot, resolvedEvalConfigPath);
   const effectiveConfig = resolveSearchConfig(parsedConfig, options.searchOverrides);
 
   if (options.reindex) {

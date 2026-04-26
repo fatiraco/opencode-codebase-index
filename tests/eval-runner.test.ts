@@ -435,6 +435,119 @@ describe("eval runner", () => {
     expect(localEvalConfig.knowledgeBases).toEqual(["docs/reference"]);
   });
 
+  it("resolves relative knowledge bases from an arbitrary explicit config path during eval reindex", async () => {
+    const mainRepoDir = path.join(tempDir, "main-repo");
+    const worktreeDir = path.join(tempDir, "worktree-feature");
+    const worktreeGitDir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+    const configDir = path.join(mainRepoDir, "config");
+    const externalKbDir = path.join(mainRepoDir, "external-kb");
+    const externalConfigPath = path.join(configDir, "eval-config.json");
+
+    mkdirSync(path.join(mainRepoDir, ".git", "refs", "heads"), { recursive: true });
+    mkdirSync(path.join(mainRepoDir, "src", "indexer"), { recursive: true });
+    mkdirSync(path.join(mainRepoDir, "src", "tools"), { recursive: true });
+    mkdirSync(path.join(mainRepoDir, "benchmarks", "golden"), { recursive: true });
+    mkdirSync(path.join(worktreeDir, ".opencode", "index"), { recursive: true });
+    mkdirSync(worktreeGitDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(externalKbDir, { recursive: true });
+    mkdirSync(worktreeDir, { recursive: true });
+
+    writeFileSync(path.join(mainRepoDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(path.join(mainRepoDir, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n");
+    writeFileSync(path.join(worktreeDir, ".git"), `gitdir: ${worktreeGitDir}\n`);
+    writeFileSync(path.join(worktreeGitDir, "HEAD"), "ref: refs/heads/feature\n");
+    writeFileSync(path.join(worktreeGitDir, "commondir"), "../..\n");
+
+    writeFileSync(
+      externalConfigPath,
+      JSON.stringify(
+        {
+          embeddingProvider: "custom",
+          customProvider: {
+            baseUrl: "http://localhost:11434/v1",
+            model: "mock-embedding-model",
+            dimensions: 8,
+          },
+          indexing: {
+            watchFiles: false,
+          },
+          knowledgeBases: ["../external-kb"],
+          search: {
+            maxResults: 10,
+            minScore: 0,
+            fusionStrategy: "rrf",
+            rrfK: 60,
+            rerankTopN: 20,
+          },
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    writeFileSync(
+      path.join(mainRepoDir, "src", "indexer", "index.ts"),
+      "export function rankHybridResults(query: string) { return query.length; }\n",
+      "utf-8"
+    );
+    writeFileSync(
+      path.join(mainRepoDir, "src", "tools", "index.ts"),
+      "export const codebase_search = () => 'ok';\n",
+      "utf-8"
+    );
+    writeFileSync(
+      path.join(externalKbDir, "guide.ts"),
+      "export function externalKbSymbol() { return 'kb'; }\n",
+      "utf-8"
+    );
+    writeFileSync(
+      path.join(mainRepoDir, "benchmarks", "golden", "small.json"),
+      JSON.stringify(
+        {
+          version: "1.0.0",
+          name: "small",
+          queries: [
+            {
+              id: "q1",
+              query: "where is externalKbSymbol implementation",
+              queryType: "definition",
+              expected: {
+                filePath: "external-kb/guide.ts",
+                symbol: "externalKbSymbol",
+              },
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    const result = await runEvaluation({
+      projectRoot: worktreeDir,
+      configPath: path.relative(worktreeDir, externalConfigPath),
+      datasetPath: path.relative(worktreeDir, path.join(mainRepoDir, "benchmarks", "golden", "small.json")),
+      outputRoot: "benchmarks/results",
+      ciMode: false,
+      reindex: true,
+    });
+
+    expect(result.perQuery).toHaveLength(1);
+    expect(result.perQuery[0]?.hitAt10).toBe(true);
+    expect(result.perQuery[0]?.failureBucket).toBeUndefined();
+
+    const localEvalConfig = JSON.parse(
+      readFileSync(path.join(worktreeDir, ".opencode", "codebase-index.json"), "utf-8")
+    ) as {
+      knowledgeBases?: string[];
+    };
+
+    expect(localEvalConfig.knowledgeBases).toEqual([path.join("..", "main-repo", "external-kb")]);
+  });
+
   it("compares against baseline and writes compare artifact", async () => {
     const baselineRun = await runEvaluation({
       projectRoot: tempDir,
