@@ -5,7 +5,7 @@ import * as path from "path";
 import { Indexer } from "./indexer/index.js";
 import type { ParsedCodebaseIndexConfig, LogLevel } from "./config/schema.js";
 import { loadMergedConfig, materializeLocalProjectConfig } from "./config/merger.js";
-import { formatDefinitionLookup, formatIndexStats, formatStatus } from "./tools/utils.js";
+import { formatDefinitionLookup, formatHealthCheck, formatIndexStats, formatStatus } from "./tools/utils.js";
 import { formatCostEstimate } from "./utils/cost.js";
 import type { LogEntry } from "./utils/logger.js";
 
@@ -167,38 +167,7 @@ export function createMcpServer(projectRoot: string, config: ParsedCodebaseIndex
     async () => {
       await ensureInitialized();
       const result = await indexer.healthCheck();
-
-      if (result.removed === 0 && result.gcOrphanEmbeddings === 0 && result.gcOrphanChunks === 0 && result.gcOrphanSymbols === 0 && result.gcOrphanCallEdges === 0) {
-        return { content: [{ type: "text", text: "Index is healthy. No stale entries found." }] };
-      }
-
-      const lines = [`Health check complete:`];
-
-      if (result.removed > 0) {
-        lines.push(`  Removed stale entries: ${result.removed}`);
-      }
-
-      if (result.gcOrphanEmbeddings > 0) {
-        lines.push(`  Garbage collected orphan embeddings: ${result.gcOrphanEmbeddings}`);
-      }
-
-      if (result.gcOrphanChunks > 0) {
-        lines.push(`  Garbage collected orphan chunks: ${result.gcOrphanChunks}`);
-      }
-
-      if (result.gcOrphanSymbols > 0) {
-        lines.push(`  Garbage collected orphan symbols: ${result.gcOrphanSymbols}`);
-      }
-
-      if (result.gcOrphanCallEdges > 0) {
-        lines.push(`  Garbage collected orphan call edges: ${result.gcOrphanCallEdges}`);
-      }
-
-      if (result.filePaths.length > 0) {
-        lines.push(`  Cleaned paths: ${result.filePaths.join(", ")}`);
-      }
-
-      return { content: [{ type: "text", text: lines.join("\n") }] };
+      return { content: [{ type: "text", text: formatHealthCheck(result) }] };
     },
   );
 

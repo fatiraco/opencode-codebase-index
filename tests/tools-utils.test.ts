@@ -98,6 +98,21 @@ describe("tools utils", () => {
       expect(result).toContain("/tmp/failed-batches.json");
     });
 
+    it("should surface corrupted index reset guidance instead of a success summary", () => {
+      const stats = createBaseStats({
+        totalFiles: 10,
+        indexedChunks: 5,
+        removedChunks: 2,
+        resetCorruptedIndex: true,
+        warning: "Detected a corrupted local SQLite index and reset the local index. Run index_codebase to rebuild search data.",
+      });
+      const result = formatIndexStats(stats);
+
+      expect(result).toContain("corrupted local SQLite index");
+      expect(result).toContain("Run index_codebase to rebuild search data");
+      expect(result).not.toContain("5 new chunks embedded");
+    });
+
     it("should not include verbose details by default", () => {
       const stats = createBaseStats({
         totalFiles: 10,
@@ -284,6 +299,27 @@ describe("tools utils", () => {
       expect(result).toContain("/tmp/index/failed-batches.json");
     });
 
+    it("should surface startup reset guidance before generic not-indexed messaging", () => {
+      const status: StatusResult = {
+        indexed: false,
+        vectorCount: 0,
+        provider: "google",
+        model: "gemini-embedding-001",
+        indexPath: "/tmp/index",
+        currentBranch: "default",
+        baseBranch: "default",
+        compatibility: null,
+        failedBatchesCount: 0,
+        failedBatchesPath: undefined,
+        warning: "Detected a corrupted local SQLite index at /tmp/index/codebase.db and reset the local index. Run index_codebase to rebuild search data.",
+      };
+      const result = formatStatus(status);
+
+      expect(result).toContain("corrupted local SQLite index");
+      expect(result).toContain("Run index_codebase to rebuild search data");
+      expect(result).not.toContain("Codebase is not indexed");
+    });
+
     it("should warn when indexed data exists alongside failed batches", () => {
       const status: StatusResult = {
         indexed: true,
@@ -435,6 +471,22 @@ describe("tools utils", () => {
   });
 
   describe("formatHealthCheck", () => {
+    it("should show corruption reset warning when health check reset the local index", () => {
+      const result = formatHealthCheck({
+        removed: 0,
+        filePaths: [],
+        gcOrphanEmbeddings: 0,
+        gcOrphanChunks: 0,
+        gcOrphanSymbols: 0,
+        gcOrphanCallEdges: 0,
+        resetCorruptedIndex: true,
+        warning: "Detected a corrupted local SQLite index and reset the local index.",
+      });
+
+      expect(result).toContain("corrupted local SQLite index");
+      expect(result).toContain("reset the local index");
+    });
+
     it("should return healthy message when nothing to clean", () => {
       const result = formatHealthCheck({
         removed: 0,

@@ -13,6 +13,10 @@ function truncateContent(content: string): string {
 }
 
 export function formatIndexStats(stats: IndexStats, verbose: boolean = false): string {
+  if (stats.resetCorruptedIndex) {
+    return stats.warning ?? "Detected a corrupted local index and reset it during indexing. Run index_codebase again to rebuild search data.";
+  }
+
   const lines: string[] = [];
 
   if (stats.failedChunks > 0) {
@@ -75,6 +79,10 @@ export function formatIndexStats(stats: IndexStats, verbose: boolean = false): s
 
 export function formatStatus(status: StatusResult): string {
   if (!status.indexed) {
+    if (status.warning) {
+      return status.warning;
+    }
+
     if (status.failedBatchesCount > 0) {
       const lines = [
         "Codebase is not indexed. The last indexing run left failed embedding batches.",
@@ -179,6 +187,10 @@ export function formatCodebasePeek(results: SearchResult[]): string {
 }
 
 export function formatHealthCheck(result: HealthCheckResult): string {
+  if (result.resetCorruptedIndex) {
+    return result.warning ?? "Detected a corrupted local index and reset it. Run index_codebase to rebuild search data.";
+  }
+
   if (result.removed === 0 && result.gcOrphanEmbeddings === 0 && result.gcOrphanChunks === 0 && result.gcOrphanSymbols === 0 && result.gcOrphanCallEdges === 0) {
     return "Index is healthy. No stale entries found.";
   }
