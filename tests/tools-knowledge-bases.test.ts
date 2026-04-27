@@ -5,16 +5,29 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { indexerInstances, MockIndexer } = vi.hoisted(() => {
-  const indexerInstances: Array<{ projectRoot: string; config: Record<string, unknown> }> = [];
+  const indexerInstances: Array<{
+    projectRoot: string;
+    config: Record<string, unknown>;
+    getStatus: ReturnType<typeof vi.fn>;
+  }> = [];
 
   class MockIndexer {
     public readonly projectRoot: string;
     public readonly config: Record<string, unknown>;
+    public getStatus = vi.fn().mockResolvedValue({
+      indexed: true,
+      vectorCount: 0,
+      provider: "ollama",
+      model: "nomic-embed-text",
+      indexPath: "/tmp/index",
+      currentBranch: "main",
+      baseBranch: "main",
+    });
 
     public constructor(projectRoot: string, config: Record<string, unknown>) {
       this.projectRoot = projectRoot;
       this.config = config;
-      indexerInstances.push({ projectRoot, config });
+      indexerInstances.push({ projectRoot, config, getStatus: this.getStatus });
     }
 
     public estimateCost = vi.fn().mockResolvedValue({
@@ -40,16 +53,6 @@ const { indexerInstances, MockIndexer } = vi.hoisted(() => {
       removedChunks: 0,
       skippedFiles: [],
       parseFailures: [],
-    });
-
-    public getStatus = vi.fn().mockResolvedValue({
-      indexed: true,
-      vectorCount: 0,
-      provider: "ollama",
-      model: "nomic-embed-text",
-      indexPath: "/tmp/index",
-      currentBranch: "main",
-      baseBranch: "main",
     });
 
     public healthCheck = vi.fn().mockResolvedValue({
@@ -80,7 +83,7 @@ vi.mock("../src/indexer/index.js", () => ({
 
 import { parseConfig } from "../src/config/schema.js";
 import { loadMergedConfig } from "../src/config/merger.js";
-import { add_knowledge_base, initializeTools, remove_knowledge_base } from "../src/tools/index.js";
+import { add_knowledge_base, index_codebase, initializeTools, remove_knowledge_base } from "../src/tools/index.js";
 
 describe("knowledge base tool config refresh", () => {
   let tempDir: string;
@@ -339,5 +342,95 @@ describe("knowledge base tool config refresh", () => {
     expect(savedMainConfig.knowledgeBases).toEqual([]);
     expect(indexerInstances.at(-1)?.projectRoot).toBe(worktreeDir);
     expect(indexerInstances.at(-1)?.config.knowledgeBases).toEqual([path.normalize(kbDir)]);
+  });
+
+  it("localizes force rebuilds before probing inherited project indexes", async () => {
+    const mainRepoDir = path.join(tempDir, "main-repo");
+    const worktreeDir = path.join(tempDir, "worktree-feature");
+    const worktreeGitDir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+
+    fs.mkdirSync(path.join(mainRepoDir, ".git", "refs", "heads"), { recursive: true });
+    fs.mkdirSync(path.join(mainRepoDir, ".opencode", "index"), { recursive: true });
+    fs.mkdirSync(path.join(mainRepoDir, ".opencode"), { recursive: true });
+    fs.mkdirSync(worktreeGitDir, { recursive: true });
+    fs.mkdirSync(worktreeDir, { recursive: true });
+
+    fs.writeFileSync(path.join(mainRepoDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(mainRepoDir, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n");
+    fs.writeFileSync(path.join(worktreeDir, ".git"), `gitdir: ${worktreeGitDir}\n`);
+    fs.writeFileSync(path.join(worktreeGitDir, "HEAD"), "ref: refs/heads/feature\n");
+    fs.writeFileSync(path.join(worktreeGitDir, "commondir"), "../..\n");
+
+    fs.writeFileSync(
+      path.join(mainRepoDir, ".opencode", "codebase-index.json"),
+      JSON.stringify({ knowledgeBases: ["docs/reference"] }, null, 2),
+      "utf-8"
+    );
+
+    indexerInstances.length = 0;
+    initializeTools(worktreeDir, parseConfig(loadMergedConfig(worktreeDir)));
+
+    await index_codebase.execute({ force: true, estimateOnly: false, verbose: false }, {
+      metadata: () => undefined,
+    });
+
+    expect(indexerInstances[0]?.getStatus).not.toHaveBeenCalled();
+    expect(indexerInstances.length).toBeGreaterThanOrEqual(2);
+    const localConfig = JSON.parse(fs.readFileSync(path.join(worktreeDir, ".opencode", "codebase-index.json"), "utf-8")) as {
+      knowledgeBases?: string[];
+    };
+    expect(localConfig.knowledgeBases).toEqual(["docs/reference"]);
+  });
+
+  it("does not snapshot global-only settings when materializing a local config boundary", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-tools-home-"));
+    const mainRepoDir = path.join(tempDir, "main-repo");
+    const worktreeDir = path.join(tempDir, "worktree-feature");
+    const worktreeGitDir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+
+    try {
+      vi.stubEnv("HOME", homeDir);
+      fs.mkdirSync(path.join(homeDir, ".config", "opencode"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".config", "opencode", "codebase-index.json"),
+        JSON.stringify({ debug: { enabled: true } }, null, 2),
+        "utf-8"
+      );
+
+      fs.mkdirSync(path.join(mainRepoDir, ".git", "refs", "heads"), { recursive: true });
+      fs.mkdirSync(path.join(mainRepoDir, ".opencode"), { recursive: true });
+      fs.mkdirSync(worktreeGitDir, { recursive: true });
+      fs.mkdirSync(worktreeDir, { recursive: true });
+
+      fs.writeFileSync(path.join(mainRepoDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+      fs.writeFileSync(path.join(mainRepoDir, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n");
+      fs.writeFileSync(path.join(worktreeDir, ".git"), `gitdir: ${worktreeGitDir}\n`);
+      fs.writeFileSync(path.join(worktreeGitDir, "HEAD"), "ref: refs/heads/feature\n");
+      fs.writeFileSync(path.join(worktreeGitDir, "commondir"), "../..\n");
+
+      const mainConfigPath = path.join(mainRepoDir, ".opencode", "codebase-index.json");
+      fs.writeFileSync(
+        mainConfigPath,
+        JSON.stringify({ knowledgeBases: [] }, null, 2),
+        "utf-8"
+      );
+
+      indexerInstances.length = 0;
+      initializeTools(worktreeDir, parseConfig(loadMergedConfig(worktreeDir)));
+
+      await add_knowledge_base.execute({ path: kbDir });
+
+      const localConfigPath = path.join(worktreeDir, ".opencode", "codebase-index.json");
+      const localConfig = JSON.parse(fs.readFileSync(localConfigPath, "utf-8")) as {
+        knowledgeBases?: string[];
+        debug?: { enabled?: boolean };
+      };
+
+      expect(localConfig.knowledgeBases).toEqual([path.normalize(kbDir)]);
+      expect(localConfig).not.toHaveProperty("debug");
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 });

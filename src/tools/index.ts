@@ -18,8 +18,9 @@ import {
 } from "./utils.js";
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import * as path from "path";
-import { loadMergedConfig, materializeLocalProjectConfig } from "../config/merger.js";
+import { loadMergedConfig, loadProjectConfigLayer, materializeLocalProjectConfig } from "../config/merger.js";
 import { resolveWritableProjectConfigPath } from "../config/paths.js";
+import { resolveWorktreeMainRepoRoot } from "../git/index.js";
 
 const z = tool.schema;
 
@@ -40,7 +41,23 @@ function refreshIndexerFromConfig(): void {
     throw new Error("Codebase index tools not initialized. Plugin may not be loaded correctly.");
   }
 
-  sharedIndexer = new Indexer(sharedProjectRoot, parseConfig(loadConfig()));
+  sharedIndexer = new Indexer(sharedProjectRoot, parseConfig(loadRuntimeConfig()));
+}
+
+function shouldForceLocalizeProjectIndex(): boolean {
+  const currentConfig = parseConfig(loadRuntimeConfig());
+  if (currentConfig.scope !== "project") {
+    return false;
+  }
+
+  const localIndexPath = path.join(sharedProjectRoot, ".opencode", "index");
+  const mainRepoRoot = resolveWorktreeMainRepoRoot(sharedProjectRoot);
+  if (!mainRepoRoot) {
+    return false;
+  }
+
+  const inheritedIndexPath = path.join(mainRepoRoot, ".opencode", "index");
+  return !existsSync(localIndexPath) && existsSync(inheritedIndexPath);
 }
 
 function getIndexer(): Indexer {
@@ -82,7 +99,19 @@ function serializeConfigPathValue(value: string, baseDir: string): string {
   return path.normalize(trimmed);
 }
 
-function loadConfig(): Record<string, unknown> {
+function normalizeKnowledgeBasePaths(config: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...config };
+
+  if (Array.isArray(normalized.knowledgeBases)) {
+    normalized.knowledgeBases = (normalized.knowledgeBases as string[]).map(kb => {
+      return normalizeConfigPathValue(kb, sharedProjectRoot);
+    });
+  }
+
+  return normalized;
+}
+
+function loadRuntimeConfig(): Record<string, unknown> {
   const rawConfig = loadMergedConfig(sharedProjectRoot);
   const config: Record<string, unknown> = {};
 
@@ -92,13 +121,20 @@ function loadConfig(): Record<string, unknown> {
     }
   }
 
-  if (Array.isArray(config.knowledgeBases)) {
-    config.knowledgeBases = (config.knowledgeBases as string[]).map(kb => {
-      return normalizeConfigPathValue(kb, sharedProjectRoot);
-    });
+  return normalizeKnowledgeBasePaths(config);
+}
+
+function loadEditableConfig(): Record<string, unknown> {
+  const rawConfig = loadProjectConfigLayer(sharedProjectRoot);
+  const config: Record<string, unknown> = {};
+
+  if (rawConfig && typeof rawConfig === "object") {
+    for (const key of Object.keys(rawConfig)) {
+      config[key] = rawConfig[key as keyof typeof rawConfig];
+    }
   }
-  
-  return config;
+
+  return normalizeKnowledgeBasePaths(config);
 }
 
 function saveConfig(config: Record<string, unknown>): void {
@@ -160,11 +196,8 @@ export const index_codebase: ToolDefinition = tool({
     }
 
     if (args.force) {
-      const status = await indexer.getStatus();
-      const localIndexPath = path.join(sharedProjectRoot, ".opencode", "index");
-      const currentConfig = parseConfig(loadConfig());
-      if (currentConfig.scope === "project" && path.resolve(status.indexPath) !== path.resolve(localIndexPath)) {
-        materializeLocalProjectConfig(sharedProjectRoot, loadMergedConfig(sharedProjectRoot));
+      if (shouldForceLocalizeProjectIndex()) {
+        materializeLocalProjectConfig(sharedProjectRoot, loadProjectConfigLayer(sharedProjectRoot));
         refreshIndexerFromConfig();
         indexer = getIndexer();
       }
@@ -404,7 +437,7 @@ export const add_knowledge_base: ToolDefinition = tool({
     }
 
     // Load current config
-    const config = loadConfig();
+    const config = loadEditableConfig();
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
@@ -439,7 +472,7 @@ export const list_knowledge_bases: ToolDefinition = tool({
     "List all configured knowledge base folders that are indexed alongside the main project.",
   args: {},
   async execute() {
-    const config = loadConfig();
+    const config = loadRuntimeConfig();
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
@@ -482,7 +515,7 @@ export const remove_knowledge_base: ToolDefinition = tool({
     const inputPath = args.path.trim();
 
     // Load current config
-    const config = loadConfig();
+    const config = loadEditableConfig();
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
