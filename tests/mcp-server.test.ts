@@ -4,13 +4,30 @@ import { parseConfig } from "../src/config/schema.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
+  return {
+    ...actual,
+    existsSync: vi.fn((targetPath: string) => targetPath.includes("/main-repo/.opencode/index")),
+  };
+});
+
+vi.mock("../src/git/index.js", () => ({
+  resolveWorktreeMainRepoRoot: vi.fn(() => "/tmp/main-repo"),
+}));
+
 const mergerMocks = vi.hoisted(() => ({
-  loadMergedConfig: vi.fn(() => ({})),
+  loadProjectConfigLayer: vi.fn(() => ({})),
   materializeLocalProjectConfig: vi.fn(),
 }));
 
 const indexerMockState = vi.hoisted(() => ({
   constructorArgs: [] as Array<[string, unknown]>,
+  instances: [] as Array<{
+    initialize: ReturnType<typeof vi.fn>;
+    getStatus: ReturnType<typeof vi.fn>;
+    clearIndex: ReturnType<typeof vi.fn>;
+  }>,
 }));
 
 vi.mock("../src/config/merger.js", () => mergerMocks);
@@ -64,6 +81,11 @@ vi.mock("../src/indexer/index.js", () => {
   class MockIndexer {
     constructor(projectRoot: string, config: unknown) {
       indexerMockState.constructorArgs.push([projectRoot, config]);
+      indexerMockState.instances.push({
+        initialize: this.initialize,
+        getStatus: this.getStatus,
+        clearIndex: this.clearIndex,
+      });
     }
 
     initialize = vi.fn().mockResolvedValue(undefined);
@@ -139,8 +161,9 @@ describe("MCP server tools and prompts", () => {
 
   beforeEach(async () => {
     indexerMockState.constructorArgs.length = 0;
-    mergerMocks.loadMergedConfig.mockReset();
-    mergerMocks.loadMergedConfig.mockReturnValue({});
+    indexerMockState.instances.length = 0;
+    mergerMocks.loadProjectConfigLayer.mockReset();
+    mergerMocks.loadProjectConfigLayer.mockReturnValue({});
     mergerMocks.materializeLocalProjectConfig.mockReset();
     mockIndexResult = {
       totalFiles: 10,
@@ -160,7 +183,7 @@ describe("MCP server tools and prompts", () => {
       vectorCount: 50,
       provider: "openai",
       model: "text-embedding-3-small",
-      indexPath: "/tmp/index",
+      indexPath: "/tmp/main-repo/.opencode/index",
       currentBranch: "main",
       baseBranch: "main",
       compatibility: { compatible: true },
@@ -329,19 +352,7 @@ describe("MCP server tools and prompts", () => {
   });
 
   it("should preserve runtime config on force refresh after localizing inherited project state", async () => {
-    mockStatusResult = {
-      ...mockStatusResult,
-      indexPath: "/tmp/shared-index",
-    };
-    mergerMocks.loadMergedConfig.mockReturnValue({
-      embeddingProvider: "openai",
-      customProvider: {
-        baseUrl: "https://disk.example.com/v1",
-        model: "disk-model",
-        dimensions: 1536,
-        apiKey: "disk-key",
-      },
-    });
+    mergerMocks.loadProjectConfigLayer.mockReturnValue({ knowledgeBases: ["docs/reference"] });
 
     const runtimeConfig = parseConfig({
       embeddingProvider: "custom",
@@ -370,10 +381,52 @@ describe("MCP server tools and prompts", () => {
     expect(result.content).toBeDefined();
     expect(mergerMocks.materializeLocalProjectConfig).toHaveBeenCalledWith(
       "/tmp/test-project",
-      mergerMocks.loadMergedConfig.mock.results.at(-1)?.value,
+      mergerMocks.loadProjectConfigLayer.mock.results.at(-1)?.value,
     );
 
     expect(indexerMockState.constructorArgs.length).toBeGreaterThanOrEqual(3);
+    expect(indexerMockState.constructorArgs.slice(-2)).toEqual([
+      ["/tmp/test-project", runtimeConfig],
+      ["/tmp/test-project", runtimeConfig],
+    ]);
+    expect(indexerMockState.instances[0]?.initialize).not.toHaveBeenCalled();
+    expect(indexerMockState.instances[0]?.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("should materialize only the project config layer during MCP force localization", async () => {
+    mergerMocks.loadProjectConfigLayer.mockReturnValue({ knowledgeBases: ["docs/reference"] });
+
+    const runtimeConfig = parseConfig({
+      embeddingProvider: "custom",
+      customProvider: {
+        baseUrl: "https://runtime.example.com/v1",
+        model: "runtime-model",
+        dimensions: 1024,
+        apiKey: "runtime-key",
+      },
+      scope: "project",
+      search: {
+        maxResults: 25,
+      },
+    });
+    server = createMcpServer("/tmp/test-project", runtimeConfig);
+    client = new Client({ name: "test-client", version: "1.0.0" });
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    await client.callTool({
+      name: "index_codebase",
+      arguments: { force: true },
+    });
+
+    expect(mergerMocks.materializeLocalProjectConfig).toHaveBeenCalledWith(
+      "/tmp/test-project",
+      { knowledgeBases: ["docs/reference"] },
+    );
     expect(indexerMockState.constructorArgs.slice(-2)).toEqual([
       ["/tmp/test-project", runtimeConfig],
       ["/tmp/test-project", runtimeConfig],
