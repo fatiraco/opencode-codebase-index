@@ -17,8 +17,25 @@ describe("indexer failed batch recovery", () => {
   beforeEach(() => {
     failEmbeddings = false;
     fetchSpy = vi.spyOn(globalThis, "fetch");
-    fetchSpy.mockImplementation(async (_url, init) => {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string[] };
+    fetchSpy.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/api/tags")) {
+        return new Response(JSON.stringify({
+          models: [{ name: "nomic-embed-text" }],
+        }), { status: 200 });
+      }
+
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string[]; prompt?: string };
+
+      if (body.prompt) {
+        if (body.prompt.includes("triggerFailure") && !body.prompt.includes("Part ")) {
+          return new Response(JSON.stringify({ error: "the input length exceeds the context length" }), { status: 500 });
+        }
+
+        return new Response(JSON.stringify({
+          embedding: Array.from({ length: 768 }, () => 0.1),
+        }), { status: 200 });
+      }
+
       const texts = Array.isArray(body.input) ? body.input : [];
 
       if (failEmbeddings) {
@@ -74,6 +91,20 @@ describe("indexer failed batch recovery", () => {
         model: "mock-embedding-model",
         dimensions: 8,
       },
+      indexing: {
+        watchFiles: false,
+        retries: 0,
+        retryDelayMs: 1,
+      },
+    });
+
+    return new Indexer(tempDir, config);
+  }
+
+  function createOllamaIndexer(): Indexer {
+    const config = parseConfig({
+      embeddingProvider: "ollama",
+      embeddingModel: "nomic-embed-text",
       indexing: {
         watchFiles: false,
         retries: 0,
@@ -144,5 +175,99 @@ describe("indexer failed batch recovery", () => {
     expect(message).toContain("rerun index_codebase normally");
     expect(message).toContain("retry the saved failed batches");
     expect(message).toContain("Use force=true only for a full rebuild or compatibility reset");
+  });
+
+  it("isolates ollama embedding failures to the offending chunk", async () => {
+    const safeFile = path.join(tempDir, "src", "safe.ts");
+    fs.writeFileSync(safeFile, "export function safeChunk() { return 'ok'; }\n", "utf-8");
+
+    fs.writeFileSync(
+      sourceFile,
+      [
+        "export const alpha = 'alpha';",
+        "export const beta = 'beta';",
+        "export const gamma = 'gamma';",
+        "export const delta = 'delta';",
+        "export const epsilon = 'epsilon';",
+        "export const zeta = 'zeta';",
+        "export const eta = 'eta';",
+        "export const theta = 'theta';",
+        "export const triggerFailure = 'triggerFailure';",
+        "export const iota = 'iota';",
+        "export const kappa = 'kappa';",
+        "export const lambda = 'lambda';",
+        "export const mu = 'mu';",
+        "export const nu = 'nu';",
+        "export const xi = 'xi';",
+        "export const omicron = 'omicron';",
+        "export const pi = 'pi';",
+        "export const rho = 'rho';",
+        "export const sigma = 'sigma';",
+        "export const tau = 'tau';",
+        "export const upsilon = 'upsilon';",
+        "export const phi = 'phi';",
+        "export const chi = 'chi';",
+        "export const psi = 'psi';",
+        "export const omega = 'omega';",
+        "export const stillWorks = 'stillWorks';",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const indexer = createOllamaIndexer();
+    const stats = await indexer.index();
+
+    expect(stats.indexedChunks).toBeGreaterThan(0);
+    expect(stats.failedChunks).toBeGreaterThan(0);
+
+    const status = await indexer.getStatus();
+    expect(status.failedBatchesCount).toBeGreaterThan(0);
+  });
+
+  it("splits oversized ollama chunks into pooled sub-requests before embedding", async () => {
+    const embedPrompts: string[] = [];
+    fetchSpy.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/api/tags")) {
+        return new Response(JSON.stringify({
+          models: [{ name: "nomic-embed-text" }],
+        }), { status: 200 });
+      }
+
+      const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+      const prompt = body.prompt ?? "";
+      embedPrompts.push(prompt);
+
+      if (prompt.length > 8200) {
+        return new Response(JSON.stringify({ error: "the input length exceeds the context length" }), { status: 500 });
+      }
+
+      const seed = prompt.length % 17;
+      return new Response(JSON.stringify({
+        embedding: Array.from({ length: 768 }, (_, idx) => seed + idx / 1000),
+      }), { status: 200 });
+    });
+
+    fs.writeFileSync(
+      sourceFile,
+      [
+        "export function oversizedChunk() {",
+        `  const blob = ${JSON.stringify("triggerFailure ".repeat(900))};`,
+        "  return blob.length;",
+        "}",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const indexer = createOllamaIndexer();
+    const stats = await indexer.index();
+
+    expect(stats.failedChunks).toBe(0);
+    expect(stats.indexedChunks).toBeGreaterThan(0);
+    expect(embedPrompts.length).toBeGreaterThan(1);
+    expect(embedPrompts.some((prompt) => prompt.includes("Part 1/"))).toBe(true);
+    expect(embedPrompts.some((prompt) => prompt.includes("Part 2/"))).toBe(true);
+
+    const status = await indexer.getStatus();
+    expect(status.failedBatchesCount).toBe(0);
   });
 });
