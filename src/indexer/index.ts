@@ -4321,6 +4321,11 @@ export class Indexer {
           embeddingPartsByChunk.delete(chunk.id);
         }
 
+        database.addChunksToBranchBatch(
+          this.getBranchCatalogKey(),
+          successfulResults.map(({ chunk }) => chunk.id)
+        );
+
         this.logger.recordChunksEmbedded(successfulResults.length);
 
         succeeded += successfulResults.length;

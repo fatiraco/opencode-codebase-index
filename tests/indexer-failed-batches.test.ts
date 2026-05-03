@@ -1203,6 +1203,33 @@ describe("indexer failed batch recovery", () => {
     expect(branchChunksAfter).toContain(existingChunkId);
   });
 
+  it("restores recovered chunks to the branch catalog during retryFailedBatches()", async () => {
+    failEmbeddings = true;
+    const initialIndexer = createIndexer();
+    const failedStats = await initialIndexer.index();
+    expect(failedStats.failedChunks).toBeGreaterThan(0);
+
+    const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
+    const dbBefore = new Database(dbPath);
+    const branchKey = "default";
+    expect(dbBefore.getBranchChunkIds(branchKey)).toHaveLength(0);
+
+    failEmbeddings = false;
+    const retryIndexer = createIndexer();
+    const retry = await retryIndexer.retryFailedBatches();
+
+    expect(retry.failed).toBe(0);
+    expect(retry.remaining).toBe(0);
+    expect(retry.succeeded).toBeGreaterThan(0);
+
+    const dbAfter = new Database(dbPath);
+    const branchChunksAfter = dbAfter.getBranchChunkIds(branchKey);
+    expect(branchChunksAfter.length).toBe(retry.succeeded);
+    for (const chunkId of branchChunksAfter) {
+      expect(dbAfter.getChunk(chunkId)).not.toBeNull();
+    }
+  });
+
   it("rolls back vectors and excludes failed chunks from branch when database upsert fails during index()", async () => {
     const originalUpsert = Database.prototype.upsertEmbeddingsBatch;
     let callCount = 0;
