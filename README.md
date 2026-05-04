@@ -827,6 +827,8 @@ ollama pull nomic-embed-text
 
 The built-in `ollama` provider uses Ollama's native `/api/embeddings` endpoint and is the simplest setup when you want to use `nomic-embed-text`.
 
+For the built-in Ollama path, the plugin budgets `nomic-embed-text` against an observed effective input limit of about **2048 tokens**, not the model's higher advertised theoretical context. This keeps batching and chunk text generation aligned with real Ollama embedding runtime behavior.
+
 If you want to use a different Ollama embedding model through its OpenAI-compatible API, use the `custom` provider instead and set `customProvider.baseUrl` to `http://127.0.0.1:11434/v1` so the plugin calls `.../v1/embeddings`.
 
 ## 📈 Performance

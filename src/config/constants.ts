@@ -77,7 +77,7 @@ export const EMBEDDING_MODELS = {
       provider: "ollama",
       model: "nomic-embed-text",
       dimensions: 768,
-      maxTokens: 8192,
+      maxTokens: 2048,
       costPer1MTokens: 0.00,
     },
     "mxbai-embed-large": {

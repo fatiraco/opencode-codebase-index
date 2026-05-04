@@ -902,6 +902,11 @@ describe("config schema", () => {
       expect(EMBEDDING_MODELS["ollama"]["mxbai-embed-large"].costPer1MTokens).toBe(0);
     });
 
+    it("should use the observed effective token budget for built-in ollama models", () => {
+      expect(EMBEDDING_MODELS["ollama"]["nomic-embed-text"].maxTokens).toBe(2048);
+      expect(EMBEDDING_MODELS["ollama"]["mxbai-embed-large"].maxTokens).toBe(512);
+    });
+
     it("should have non-zero cost for paid providers", () => {
       expect(EMBEDDING_MODELS["openai"]["text-embedding-3-small"].costPer1MTokens).toBeGreaterThan(0);
       expect(EMBEDDING_MODELS["openai"]["text-embedding-3-large"].costPer1MTokens).toBeGreaterThan(0);

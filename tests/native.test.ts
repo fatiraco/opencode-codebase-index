@@ -8,6 +8,7 @@ import {
   hashContent,
   hashFile,
   VectorStore,
+  createEmbeddingTexts,
   createEmbeddingText,
   createDynamicBatches,
   generateChunkId,
@@ -588,6 +589,84 @@ trait Timestampable {
       const batches = createDynamicBatches(chunks);
 
       expect(batches.length).toBe(2);
+    });
+
+    it("should respect maxBatchItems option", () => {
+      const chunks = [
+        { text: "a".repeat(100), id: "1" },
+        { text: "b".repeat(100), id: "2" },
+        { text: "c".repeat(100), id: "3" },
+      ];
+
+      const batches = createDynamicBatches(chunks, { maxBatchItems: 1 });
+
+      expect(batches).toHaveLength(3);
+      expect(batches.every((batch) => batch.length === 1)).toBe(true);
+    });
+
+    it("should respect maxBatchTokens override", () => {
+      const chunks = [
+        { text: "a".repeat(1000), id: "1" },
+        { text: "b".repeat(1000), id: "2" },
+      ];
+
+      const batches = createDynamicBatches(chunks, { maxBatchTokens: 300 });
+
+      expect(batches).toHaveLength(2);
+    });
+  });
+
+  describe("createEmbeddingText", () => {
+    it("should respect a lower max token override", () => {
+      const chunk: CodeChunk = {
+        content: "x".repeat(10000),
+        startLine: 1,
+        endLine: 50,
+        chunkType: "function",
+        name: "hugeChunk",
+        language: "typescript",
+      };
+
+      const text = createEmbeddingText(chunk, "/src/huge.ts", 256);
+
+      expect(text.length).toBeLessThan(256 * 4 + 64);
+      expect(text).toContain("... [truncated]");
+    });
+  });
+
+  describe("createEmbeddingTexts", () => {
+    it("splits oversized chunks into multiple embedding texts with part markers", () => {
+      const chunk: CodeChunk = {
+        content: "x".repeat(8000),
+        startLine: 1,
+        endLine: 200,
+        chunkType: "function",
+        name: "hugeChunk",
+        language: "typescript",
+      };
+
+      const texts = createEmbeddingTexts(chunk, "/src/huge.ts", 256);
+
+      expect(texts.length).toBeGreaterThan(1);
+      expect(texts[0]).toContain("Part 1/");
+      expect(texts[1]).toContain("Part 2/");
+      expect(texts.every((text) => text.length <= 256 * 4 + 128)).toBe(true);
+    });
+
+    it("returns a single text when the chunk fits the token budget", () => {
+      const chunk: CodeChunk = {
+        content: "function small() { return 1; }",
+        startLine: 1,
+        endLine: 3,
+        chunkType: "function",
+        name: "small",
+        language: "typescript",
+      };
+
+      const texts = createEmbeddingTexts(chunk, "/src/small.ts", 512);
+
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).not.toContain("Part 1/");
     });
   });
 
