@@ -231,6 +231,41 @@ public class AccountService {
       // Language label is consistent.
       expect(chunks.every((c) => c.language === "apex")).toBe(true);
     });
+
+    it("should parse Zig files", () => {
+      const content = `
+const std = @import("std");
+
+/// Adds two integers.
+pub fn add(a: i32, b: i32) i32 {
+    return a + b;
+}
+
+const Point = struct {
+    x: f32,
+    y: f32,
+};
+
+test "add works" {
+    try std.testing.expect(add(1, 2) == 3);
+}
+`;
+      const chunks = parseFile("main.zig", content);
+
+      // Should produce semantic chunks for each declaration
+      expect(chunks.length).toBeGreaterThanOrEqual(2);
+
+      const chunkTypes = chunks.map((c) => c.chunkType);
+      expect(chunkTypes).toContain("function_declaration");
+      expect(chunkTypes).toContain("test_declaration");
+
+      // Doc comment must be attached to the fn add chunk
+      const addChunk = chunks.find(
+        (c) => c.chunkType === "function_declaration" && c.content.includes("fn add"),
+      );
+      expect(addChunk).toBeDefined();
+      expect(addChunk!.content).toContain("Adds two integers");
+    });
   });
 
   describe("parseFiles", () => {
@@ -609,7 +644,7 @@ public class AccountService {
       });
 
       const metadataMap = store.getMetadataBatch(["chunk1", "chunk3", "nonexistent"]);
-      
+
       expect(metadataMap.size).toBe(2);
       expect(metadataMap.get("chunk1")?.filePath).toBe("a.ts");
       expect(metadataMap.get("chunk3")?.filePath).toBe("c.ts");

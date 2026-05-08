@@ -508,6 +508,51 @@ describe("call-graph", () => {
     });
   });
 
+  describe("zig call extraction", () => {
+    it("should extract direct function calls", () => {
+      const content = `
+const std = @import("std");
+
+pub fn greet(name: []const u8) void {
+    std.debug.print("Hello, {s}\\n", .{name});
+}
+
+pub fn main() void {
+    greet("world");
+}
+`;
+      const calls = extractCalls(content, "zig");
+      const callNames = calls.map((c) => c.calleeName);
+      expect(callNames).toContain("greet");
+    });
+
+    it("should classify field-access calls as MethodCall", () => {
+      const content = `
+const std = @import("std");
+
+pub fn greet(name: []const u8) void {
+    std.debug.print("Hello, {s}\\n", .{name});
+}
+`;
+      const calls = extractCalls(content, "zig");
+      const printCall = calls.find((c) => c.calleeName === "print");
+      expect(printCall).toBeDefined();
+      expect(printCall!.callType).toBe("MethodCall");
+    });
+
+    it("should extract @import builtins as import edges", () => {
+      const content = `
+const std = @import("std");
+const math = @import("math.zig");
+`;
+      const calls = extractCalls(content, "zig");
+      const importCalls = calls.filter((c) => c.callType === "Import");
+      expect(importCalls.length).toBeGreaterThanOrEqual(2);
+      expect(importCalls.some((c) => c.calleeName.includes("std"))).toBe(true);
+      expect(importCalls.some((c) => c.calleeName.includes("math.zig"))).toBe(true);
+    });
+  });
+
   describe("call graph storage", () => {
     it("should store symbols in database", () => {
       const db = openDb();
