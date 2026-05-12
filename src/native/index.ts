@@ -754,6 +754,11 @@ export class Database {
     return this.inner.deleteChunksByFile(filePath);
   }
 
+  deleteChunksByIds(chunkIds: string[]): number {
+    if (chunkIds.length === 0) return 0;
+    return this.inner.deleteChunksByIds(chunkIds);
+  }
+
   addChunksToBranch(branch: string, chunkIds: string[]): void {
     this.inner.addChunksToBranch(branch, chunkIds);
   }
