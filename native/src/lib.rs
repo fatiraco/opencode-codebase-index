@@ -558,6 +558,17 @@ impl Database {
     }
 
     #[napi]
+    pub fn delete_chunks_by_ids(&self, chunk_ids: Vec<String>) -> Result<u32> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let count = db::delete_chunks_by_ids(&conn, &chunk_ids)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(count as u32)
+    }
+
+    #[napi]
     pub fn add_chunks_to_branch(&self, branch: String, chunk_ids: Vec<String>) -> Result<()> {
         let conn = self
             .conn

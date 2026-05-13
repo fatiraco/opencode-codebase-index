@@ -2216,9 +2216,11 @@ export class Indexer {
     const sharedChunkIds = new Set(database.getReferencedChunkIds(removedChunkIdList));
     const removableChunkIds = removedChunkIdList.filter((chunkId) => !sharedChunkIds.has(chunkId));
 
-    for (const chunkId of removableChunkIds) {
-      store.remove(chunkId);
-      invertedIndex.removeChunk(chunkId);
+    if (removableChunkIds.length > 0) {
+      this.rebuildVectorStoreExcludingChunkIds(store, database, removableChunkIds);
+      for (const chunkId of removableChunkIds) {
+        invertedIndex.removeChunk(chunkId);
+      }
     }
 
     for (const branchKey of this.getProjectScopedBranchCatalogCleanupKeys(Array.from(projectLocalChunkIds), Array.from(projectLocalSymbolIds))) {
@@ -2766,6 +2768,111 @@ export class Indexer {
     }
 
     return null;
+  }
+
+  private rebuildVectorStoreExcludingChunkIds(
+    store: VectorStore,
+    database: Database,
+    excludedChunkIds: Iterable<string>
+  ): void {
+    const excludedSet = new Set(excludedChunkIds);
+    if (excludedSet.size === 0) {
+      return;
+    }
+
+    const retainedEntries = store
+      .getAllMetadata()
+      .filter(({ key }) => !excludedSet.has(key));
+
+    const storeBasePath = path.join(this.indexPath, "vectors");
+    const storeIndexPath = `${storeBasePath}.usearch`;
+    const storeMetadataPath = `${storeBasePath}.meta.json`;
+    const backupIndexPath = `${storeIndexPath}.bak`;
+    const backupMetadataPath = `${storeMetadataPath}.bak`;
+
+    let backedUpIndex = false;
+    let backedUpMetadata = false;
+    let rebuiltCount = 0;
+    let skippedCount = 0;
+
+    if (existsSync(backupIndexPath)) {
+      unlinkSync(backupIndexPath);
+    }
+    if (existsSync(backupMetadataPath)) {
+      unlinkSync(backupMetadataPath);
+    }
+
+    try {
+      if (existsSync(storeIndexPath)) {
+        renameSync(storeIndexPath, backupIndexPath);
+        backedUpIndex = true;
+      }
+      if (existsSync(storeMetadataPath)) {
+        renameSync(storeMetadataPath, backupMetadataPath);
+        backedUpMetadata = true;
+      }
+
+      store.clear();
+
+      for (const { key, metadata } of retainedEntries) {
+        const chunk = database.getChunk(key);
+        if (!chunk) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const embeddingBuffer = database.getEmbedding(chunk.contentHash);
+        if (!embeddingBuffer) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const vector = bufferToFloat32Array(embeddingBuffer);
+        store.add(key, Array.from(vector), metadata);
+        rebuiltCount += 1;
+      }
+
+      store.save();
+
+      if (backedUpIndex && existsSync(backupIndexPath)) {
+        unlinkSync(backupIndexPath);
+      }
+      if (backedUpMetadata && existsSync(backupMetadataPath)) {
+        unlinkSync(backupMetadataPath);
+      }
+
+      this.logger.gc("info", "Rebuilt vector store to avoid native remove", {
+        excludedChunks: excludedSet.size,
+        rebuiltChunks: rebuiltCount,
+        skippedChunks: skippedCount,
+      });
+    } catch (error) {
+      try {
+        store.clear();
+      } catch {
+        // Ignore best-effort cleanup before restore.
+      }
+
+      if (existsSync(storeIndexPath)) {
+        unlinkSync(storeIndexPath);
+      }
+      if (existsSync(storeMetadataPath)) {
+        unlinkSync(storeMetadataPath);
+      }
+
+      if (backedUpIndex && existsSync(backupIndexPath)) {
+        renameSync(backupIndexPath, storeIndexPath);
+      }
+      if (backedUpMetadata && existsSync(backupMetadataPath)) {
+        renameSync(backupMetadataPath, storeMetadataPath);
+      }
+
+      if (backedUpIndex || backedUpMetadata) {
+        store.load();
+      }
+
+      throw error;
+    }
   }
 
   private getCorruptedIndexWarning(dbPath: string): string {
@@ -3345,14 +3452,22 @@ export class Indexer {
       }
     }
 
-    let removedCount = 0;
+    const removedChunkIds: string[] = [];
     for (const [chunkId] of existingChunks) {
       if (!currentChunkIds.has(chunkId)) {
-        store.remove(chunkId);
-        invertedIndex.removeChunk(chunkId);
-        removedCount++;
+        removedChunkIds.push(chunkId);
       }
     }
+
+    if (removedChunkIds.length > 0) {
+      this.rebuildVectorStoreExcludingChunkIds(store, database, removedChunkIds);
+      for (const chunkId of removedChunkIds) {
+        invertedIndex.removeChunk(chunkId);
+      }
+      database.deleteChunksByIds(removedChunkIds);
+    }
+
+    const removedCount = removedChunkIds.length;
 
     stats.totalChunks = pendingChunks.length;
     stats.existingChunks = currentChunkIds.size - pendingChunks.length;
@@ -3579,10 +3694,11 @@ export class Indexer {
             try {
               database.upsertEmbeddingsBatch(embeddingBatchItems);
             } catch (dbError) {
-              // Rollback vectors added to store if DB write fails
-              for (const { chunk } of pooledResults) {
-                store.remove(chunk.id);
-              }
+              this.rebuildVectorStoreExcludingChunkIds(
+                store,
+                database,
+                pooledResults.map(({ chunk }) => chunk.id)
+              );
               throw dbError;
             }
 
@@ -4248,21 +4364,36 @@ export class Indexer {
     }
 
     const removedFilePaths: string[] = [];
-    let removedCount = 0;
+    const removedChunkKeys: string[] = [];
+    const chunkKeysByRemovedFile = new Map<string, string[]>();
 
     for (const [filePath, chunkKeys] of filePathsToChunkKeys) {
       if (!existsSync(filePath)) {
+        chunkKeysByRemovedFile.set(filePath, chunkKeys);
         for (const key of chunkKeys) {
-          store.remove(key);
-          invertedIndex.removeChunk(key);
-          removedCount++;
+          removedChunkKeys.push(key);
         }
-        database.deleteChunksByFile(filePath);
-        database.deleteCallEdgesByFile(filePath);
-        database.deleteSymbolsByFile(filePath);
         removedFilePaths.push(filePath);
       }
     }
+
+    if (removedChunkKeys.length > 0) {
+      this.rebuildVectorStoreExcludingChunkIds(store, database, removedChunkKeys);
+      for (const key of removedChunkKeys) {
+        invertedIndex.removeChunk(key);
+      }
+    }
+
+    for (const filePath of removedFilePaths) {
+      const fileChunkKeys = chunkKeysByRemovedFile.get(filePath) ?? [];
+      if (fileChunkKeys.length > 0) {
+        database.deleteChunksByIds(fileChunkKeys);
+      }
+      database.deleteCallEdgesByFile(filePath);
+      database.deleteSymbolsByFile(filePath);
+    }
+
+    const removedCount = removedChunkKeys.length;
 
     if (removedCount > 0) {
       store.save();
@@ -4447,10 +4578,11 @@ export class Indexer {
               }))
             );
           } catch (dbError) {
-            // Rollback vectors added to store if DB write fails
-            for (const { chunk } of successfulResults) {
-              store.remove(chunk.id);
-            }
+            this.rebuildVectorStoreExcludingChunkIds(
+              store,
+              database,
+              successfulResults.map(({ chunk }) => chunk.id)
+            );
             throw dbError;
           }
         }

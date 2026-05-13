@@ -557,6 +557,24 @@ pub fn delete_chunks_by_file(conn: &Connection, file_path: &str) -> DbResult<usi
     Ok(count)
 }
 
+/// Delete chunks by their IDs.
+pub fn delete_chunks_by_ids(conn: &Connection, chunk_ids: &[String]) -> DbResult<usize> {
+    if chunk_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut deleted = 0;
+    for chunk_batch in chunk_ids.chunks(SQL_BIND_PARAM_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk_batch.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("DELETE FROM chunks WHERE chunk_id IN ({})", placeholders);
+        deleted += conn.execute(&sql, rusqlite::params_from_iter(chunk_batch.iter()))?;
+    }
+
+    Ok(deleted)
+}
+
 #[derive(Debug, Clone)]
 pub struct ChunkRow {
     pub chunk_id: String,

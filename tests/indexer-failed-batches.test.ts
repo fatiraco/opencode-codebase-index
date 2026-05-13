@@ -1418,46 +1418,54 @@ describe("indexer failed batch recovery", () => {
   it("rolls back vectors and excludes failed chunks from branch when database upsert fails during index()", async () => {
     const originalUpsert = Database.prototype.upsertEmbeddingsBatch;
     let callCount = 0;
+    const removeSpy = vi.spyOn(VectorStore.prototype, "remove").mockImplementation(() => {
+      throw new Error("native remove should not be called during index rollback");
+    });
 
-    vi.spyOn(Database.prototype, "upsertEmbeddingsBatch").mockImplementation(
-      function (
-        this: Database,
-        items: Array<{ contentHash: string; embedding: Buffer; chunkText: string; model: string }>
-      ) {
-        callCount += 1;
-        if (callCount === 1) {
-          throw new Error("database write failed");
+    try {
+      vi.spyOn(Database.prototype, "upsertEmbeddingsBatch").mockImplementation(
+        function (
+          this: Database,
+          items: Array<{ contentHash: string; embedding: Buffer; chunkText: string; model: string }>
+        ) {
+          callCount += 1;
+          if (callCount === 1) {
+            throw new Error("database write failed");
+          }
+          return originalUpsert.call(this, items);
         }
-        return originalUpsert.call(this, items);
+      );
+
+      const indexer = createIndexer();
+      const stats = await indexer.index();
+
+      expect(stats.failedChunks).toBeGreaterThan(0);
+      expect(stats.indexedChunks).toBe(0);
+      expect(removeSpy).not.toHaveBeenCalled();
+
+      const status = await indexer.getStatus();
+      expect(status.indexed).toBe(false);
+      expect(status.failedBatchesCount).toBeGreaterThan(0);
+
+      const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
+      const dbAfter = trackDb(new Database(dbPath));
+      const branches = dbAfter.getAllBranches();
+      const branchKey = branches.find((b) => b.includes("default")) || branches[0];
+      if (branchKey) {
+        const branchChunks = dbAfter.getBranchChunkIds(branchKey);
+        expect(branchChunks.length).toBe(0);
       }
-    );
 
-    const indexer = createIndexer();
-    const stats = await indexer.index();
-
-    expect(stats.failedChunks).toBeGreaterThan(0);
-    expect(stats.indexedChunks).toBe(0);
-
-    const status = await indexer.getStatus();
-    expect(status.indexed).toBe(false);
-    expect(status.failedBatchesCount).toBeGreaterThan(0);
-
-    const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
-    const dbAfter = trackDb(new Database(dbPath));
-    const branches = dbAfter.getAllBranches();
-    const branchKey = branches.find((b) => b.includes("default")) || branches[0];
-    if (branchKey) {
-      const branchChunks = dbAfter.getBranchChunkIds(branchKey);
-      expect(branchChunks.length).toBe(0);
-    }
-
-    const failedBatchesPath = path.join(tempDir, ".opencode", "index", "failed-batches.json");
-    if (fs.existsSync(failedBatchesPath)) {
-      const failedBatches = JSON.parse(fs.readFileSync(failedBatchesPath, "utf-8")) as Array<{
-        error: string;
-      }>;
-      expect(failedBatches.length).toBeGreaterThan(0);
-      expect(failedBatches[0]?.error).toContain("database write failed");
+      const failedBatchesPath = path.join(tempDir, ".opencode", "index", "failed-batches.json");
+      if (fs.existsSync(failedBatchesPath)) {
+        const failedBatches = JSON.parse(fs.readFileSync(failedBatchesPath, "utf-8")) as Array<{
+          error: string;
+        }>;
+        expect(failedBatches.length).toBeGreaterThan(0);
+        expect(failedBatches[0]?.error).toContain("database write failed");
+      }
+    } finally {
+      removeSpy.mockRestore();
     }
   });
 
@@ -1471,44 +1479,52 @@ describe("indexer failed batch recovery", () => {
 
     const originalUpsert = Database.prototype.upsertEmbeddingsBatch;
     let callCount = 0;
+    const removeSpy = vi.spyOn(VectorStore.prototype, "remove").mockImplementation(() => {
+      throw new Error("native remove should not be called during retry rollback");
+    });
 
-    vi.spyOn(Database.prototype, "upsertEmbeddingsBatch").mockImplementation(
-      function (
-        this: Database,
-        items: Array<{ contentHash: string; embedding: Buffer; chunkText: string; model: string }>
-      ) {
-        callCount += 1;
-        if (callCount === 1) {
-          throw new Error("database write failed during retry");
+    try {
+      vi.spyOn(Database.prototype, "upsertEmbeddingsBatch").mockImplementation(
+        function (
+          this: Database,
+          items: Array<{ contentHash: string; embedding: Buffer; chunkText: string; model: string }>
+        ) {
+          callCount += 1;
+          if (callCount === 1) {
+            throw new Error("database write failed during retry");
+          }
+          return originalUpsert.call(this, items);
         }
-        return originalUpsert.call(this, items);
+      );
+
+      const retry = await indexer.retryFailedBatches();
+
+      expect(retry.succeeded).toBe(0);
+      expect(retry.failed).toBeGreaterThan(0);
+      expect(removeSpy).not.toHaveBeenCalled();
+
+      const status = await indexer.getStatus();
+      expect(status.failedBatchesCount).toBeGreaterThan(0);
+
+      const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
+      const dbAfter = trackDb(new Database(dbPath));
+      const branches = dbAfter.getAllBranches();
+      const branchKey = branches.find((b) => b.includes("default")) || branches[0];
+      if (branchKey) {
+        const branchChunks = dbAfter.getBranchChunkIds(branchKey);
+        expect(branchChunks.length).toBe(0);
       }
-    );
 
-    const retry = await indexer.retryFailedBatches();
-
-    expect(retry.succeeded).toBe(0);
-    expect(retry.failed).toBeGreaterThan(0);
-
-    const status = await indexer.getStatus();
-    expect(status.failedBatchesCount).toBeGreaterThan(0);
-
-    const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
-    const dbAfter = trackDb(new Database(dbPath));
-    const branches = dbAfter.getAllBranches();
-    const branchKey = branches.find((b) => b.includes("default")) || branches[0];
-    if (branchKey) {
-      const branchChunks = dbAfter.getBranchChunkIds(branchKey);
-      expect(branchChunks.length).toBe(0);
+      const failedBatchesPath = path.join(tempDir, ".opencode", "index", "failed-batches.json");
+      if (fs.existsSync(failedBatchesPath)) {
+        const failedBatches = JSON.parse(fs.readFileSync(failedBatchesPath, "utf-8")) as Array<{
+          error: string;
+        }>;
+        expect(failedBatches.length).toBeGreaterThan(0);
+        expect(failedBatches[0]?.error).toContain("database write failed during retry");
+      }
+    } finally {
+      removeSpy.mockRestore();
     }
-
-     const failedBatchesPath = path.join(tempDir, ".opencode", "index", "failed-batches.json");
-     if (fs.existsSync(failedBatchesPath)) {
-       const failedBatches = JSON.parse(fs.readFileSync(failedBatchesPath, "utf-8")) as Array<{
-         error: string;
-       }>;
-       expect(failedBatches.length).toBeGreaterThan(0);
-       expect(failedBatches[0]?.error).toContain("database write failed during retry");
-     }
-   });
+  });
 });

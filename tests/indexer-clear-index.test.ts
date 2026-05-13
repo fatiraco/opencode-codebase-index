@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMergedConfig } from "../src/config/merger.js";
 import { parseConfig } from "../src/config/schema.js";
 import { Indexer } from "../src/indexer/index.js";
-import { Database } from "../src/native/index.js";
+import { Database, VectorStore } from "../src/native/index.js";
 import { hashContent } from "../src/native/index.js";
 
 describe("indexer clearIndex force rebuild", () => {
@@ -221,7 +221,14 @@ describe("indexer clearIndex force rebuild", () => {
     await indexerA.index();
     await indexerB.index();
 
+    const removeSpy = vi.spyOn(VectorStore.prototype, "remove").mockImplementation(() => {
+      throw new Error("native remove should not be called during clearIndex");
+    });
+
     await indexerA.clearIndex();
+
+    expect(removeSpy).not.toHaveBeenCalled();
+    removeSpy.mockRestore();
 
     const dbPath = path.join(tempHome, ".opencode", "global-index", "codebase.db");
     const db = trackDb(new Database(dbPath));
@@ -238,6 +245,40 @@ describe("indexer clearIndex force rebuild", () => {
     const fileHashCache = JSON.parse(fs.readFileSync(fileHashCachePath, "utf-8")) as Record<string, string>;
     expect(fileHashCache[projectAFile]).toBeUndefined();
     expect(typeof fileHashCache[projectBFile]).toBe("string");
+  });
+
+  it("rebuilds the vector store during incremental removals without calling native remove", async () => {
+    const indexer = createIndexer(tempDir, 8);
+    await indexer.index();
+
+    const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
+    const dbBefore = trackDb(new Database(dbPath));
+    const chunkIdsBefore = dbBefore.getChunksByFile(sourceFile).map((chunk) => chunk.chunkId);
+
+    fs.writeFileSync(
+      sourceFile,
+      [
+        "export function alpha() {",
+        "  return 'alpha';",
+        "}",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const removeSpy = vi.spyOn(VectorStore.prototype, "remove").mockImplementation(() => {
+      throw new Error("native remove should not be called during incremental indexing");
+    });
+
+    const stats = await indexer.index();
+
+    expect(stats.removedChunks).toBeGreaterThan(0);
+    expect(stats.failedChunks).toBe(0);
+    expect(removeSpy).not.toHaveBeenCalled();
+    removeSpy.mockRestore();
+
+    const dbAfter = trackDb(new Database(dbPath));
+    const chunkIdsAfter = new Set(dbAfter.getChunksByFile(sourceFile).map((chunk) => chunk.chunkId));
+    expect(chunkIdsBefore.some((chunkId) => !chunkIdsAfter.has(chunkId))).toBe(true);
   });
 
   it("rejects an incompatible global force reset when the shared index contains other projects", async () => {
@@ -789,6 +830,34 @@ describe("indexer clearIndex force rebuild", () => {
     const status = await indexer.getStatus();
     expect(status.indexed).toBe(false);
     expect(status.vectorCount).toBe(0);
+  });
+
+  it("rebuilds the vector store during health check cleanup without calling native remove", async () => {
+    const indexer = createIndexer(tempDir, 8);
+    await indexer.index();
+
+    const retainedFile = path.join(tempDir, "src", "retained.ts");
+    fs.writeFileSync(retainedFile, "export function gamma() { return 'g'; }\n", "utf-8");
+    await indexer.index();
+
+    fs.rmSync(sourceFile, { force: true });
+
+    const removeSpy = vi.spyOn(VectorStore.prototype, "remove").mockImplementation(() => {
+      throw new Error("native remove should not be called during health check");
+    });
+
+    const result = await indexer.healthCheck();
+
+    expect(result.removed).toBeGreaterThan(0);
+    expect(removeSpy).not.toHaveBeenCalled();
+    removeSpy.mockRestore();
+
+    const status = await indexer.getStatus();
+    expect(status.vectorCount).toBeGreaterThan(0);
+
+    const dbPath = path.join(tempDir, ".opencode", "index", "codebase.db");
+    const db = trackDb(new Database(dbPath));
+    expect(db.getChunksByFile(retainedFile).length).toBeGreaterThan(0);
   });
 
   it("refuses to auto-reset a corrupted shared global sqlite index", async () => {

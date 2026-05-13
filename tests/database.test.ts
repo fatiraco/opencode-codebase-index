@@ -112,6 +112,20 @@ describe("Database", () => {
       expect(deleted).toBe(2);
       expect(db.getChunk("chunk_abc123")).toBeNull();
     });
+
+    it("should delete chunks by ids", () => {
+      db.upsertChunk(testChunk);
+      db.upsertChunk({
+        ...testChunk,
+        chunkId: "chunk_def456",
+      });
+
+      const deleted = db.deleteChunksByIds(["chunk_abc123"]);
+
+      expect(deleted).toBe(1);
+      expect(db.getChunk("chunk_abc123")).toBeNull();
+      expect(db.getChunk("chunk_def456")).not.toBeNull();
+    });
   });
 
   describe("branch_chunks", () => {
