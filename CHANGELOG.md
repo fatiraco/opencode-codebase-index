@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-05-22
+
+### Changed
+- **Release metadata alignment**: Reconciled the post-`v0.8.0` shipped delta so the changelog and release metadata match the fixes that landed after the `v0.8.0` tag.
+
+### Fixed
+- **Atomic file-hash cache writes**: `Indexer.atomicWriteSync()` now recreates missing parent directories before writing `file-hashes.json.tmp`, preventing `ENOENT` crashes after the index directory has been removed.
+
 ## [0.8.0] - 2026-05-14
 
 ### Added
@@ -280,7 +288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File watcher for automatic re-indexing
 - OpenCode tools: `codebase_search`, `index_codebase`, `index_status`, `index_health_check`
 
-[Unreleased]: https://github.com/Helweg/opencode-codebase-index/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Helweg/opencode-codebase-index/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/Helweg/opencode-codebase-index/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Helweg/opencode-codebase-index/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Helweg/opencode-codebase-index/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/Helweg/opencode-codebase-index/compare/v0.6.0...v0.6.1
