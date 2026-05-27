@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 
 import { resolveProjectConfigPath } from "./paths.js";
+import { resolveInheritedKnowledgeBaseEntries } from "./rebase.js";
 
 function loadJsonFile(filePath: string): unknown {
   try {
@@ -12,72 +13,6 @@ function loadJsonFile(filePath: string): unknown {
     }
   } catch { /* ignore */ }
   return null;
-}
-
-function normalizeRelativeConfigPath(candidate: string): string {
-  return candidate.replace(/\\/g, "/");
-}
-
-export function rebasePathEntries(
-  values: unknown,
-  fromDir: string,
-  toDir: string,
-): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-
-  return values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => {
-      const trimmed = value.trim();
-      if (!trimmed || path.isAbsolute(trimmed)) {
-        return trimmed;
-      }
-
-      return normalizeRelativeConfigPath(path.normalize(path.relative(toDir, path.resolve(fromDir, trimmed))));
-    })
-    .filter(Boolean);
-}
-
-function isWithinRoot(rootDir: string, targetPath: string): boolean {
-  const relativePath = path.relative(rootDir, targetPath);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-}
-
-export function resolveInheritedKnowledgeBaseEntries(
-  values: unknown,
-  sourceRoot: string,
-  targetRoot: string,
-): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-
-  return values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return trimmed;
-      }
-
-      if (path.isAbsolute(trimmed)) {
-        if (isWithinRoot(sourceRoot, trimmed)) {
-          return normalizeRelativeConfigPath(path.normalize(path.relative(sourceRoot, trimmed) || "."));
-        }
-
-        return path.normalize(trimmed);
-      }
-
-      const resolvedFromSource = path.resolve(sourceRoot, trimmed);
-      if (isWithinRoot(sourceRoot, resolvedFromSource)) {
-        return normalizeRelativeConfigPath(path.normalize(trimmed));
-      }
-
-      return normalizeRelativeConfigPath(path.normalize(path.relative(targetRoot, resolvedFromSource)));
-    })
-    .filter(Boolean);
 }
 
 export function materializeLocalProjectConfig(projectRoot: string, config: unknown): string {
