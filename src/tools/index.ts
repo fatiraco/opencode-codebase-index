@@ -19,15 +19,13 @@ import {
 import {
   findKnowledgeBasePathIndex,
   hasMatchingKnowledgeBasePath,
-  resolveConfigPathValue,
   resolveKnowledgeBasePath,
-  serializeConfigPathValue,
 } from "./knowledge-base-paths.js";
-import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
+import { existsSync, statSync } from "fs";
 import * as path from "path";
-import { loadMergedConfig, loadProjectConfigLayer, materializeLocalProjectConfig } from "../config/merger.js";
-import { resolveWritableProjectConfigPath } from "../config/paths.js";
+import { loadProjectConfigLayer, materializeLocalProjectConfig } from "../config/merger.js";
 import { resolveWorktreeMainRepoRoot } from "../git/index.js";
+import { getConfigPath, loadEditableConfig, loadRuntimeConfig, saveConfig } from "./config-state.js";
 
 const z = tool.schema;
 
@@ -48,11 +46,11 @@ function refreshIndexerFromConfig(): void {
     throw new Error("Codebase index tools not initialized. Plugin may not be loaded correctly.");
   }
 
-  sharedIndexer = new Indexer(sharedProjectRoot, parseConfig(loadRuntimeConfig()));
+  sharedIndexer = new Indexer(sharedProjectRoot, parseConfig(loadRuntimeConfig(sharedProjectRoot)));
 }
 
 function shouldForceLocalizeProjectIndex(): boolean {
-  const currentConfig = parseConfig(loadRuntimeConfig());
+  const currentConfig = parseConfig(loadRuntimeConfig(sharedProjectRoot));
   if (currentConfig.scope !== "project") {
     return false;
   }
@@ -72,67 +70,6 @@ function getIndexer(): Indexer {
     throw new Error("Codebase index tools not initialized. Plugin may not be loaded correctly.");
   }
   return sharedIndexer;
-}
-
-function getConfigPath(): string {
-  return resolveWritableProjectConfigPath(sharedProjectRoot);
-}
-
-function normalizeKnowledgeBasePaths(config: Record<string, unknown>): Record<string, unknown> {
-  const normalized = { ...config };
-
-  if (Array.isArray(normalized.knowledgeBases)) {
-    normalized.knowledgeBases = (normalized.knowledgeBases as string[]).map(kb => {
-      return resolveConfigPathValue(kb, sharedProjectRoot);
-    });
-  }
-
-  return normalized;
-}
-
-function loadRuntimeConfig(): Record<string, unknown> {
-  const rawConfig = loadMergedConfig(sharedProjectRoot);
-  const config: Record<string, unknown> = {};
-
-  if (rawConfig && typeof rawConfig === "object") {
-    for (const key of Object.keys(rawConfig)) {
-      config[key] = rawConfig[key as keyof typeof rawConfig];
-    }
-  }
-
-  return normalizeKnowledgeBasePaths(config);
-}
-
-function loadEditableConfig(): Record<string, unknown> {
-  const rawConfig = loadProjectConfigLayer(sharedProjectRoot);
-  const config: Record<string, unknown> = {};
-
-  if (rawConfig && typeof rawConfig === "object") {
-    for (const key of Object.keys(rawConfig)) {
-      config[key] = rawConfig[key as keyof typeof rawConfig];
-    }
-  }
-
-  return normalizeKnowledgeBasePaths(config);
-}
-
-function saveConfig(config: Record<string, unknown>): void {
-  const configPath = getConfigPath();
-  const configDir = path.dirname(configPath);
-  const configBaseDir = path.dirname(configDir);
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
-  }
-
-  const serializableConfig: Record<string, unknown> = { ...config };
-
-  if (Array.isArray(serializableConfig.knowledgeBases)) {
-    serializableConfig.knowledgeBases = (serializableConfig.knowledgeBases as string[]).map(kb =>
-      serializeConfigPathValue(kb, configBaseDir)
-    );
-  }
-
-  writeFileSync(configPath, JSON.stringify(serializableConfig, null, 2) + "\n", "utf-8");
 }
 
 export const codebase_peek: ToolDefinition = tool({
@@ -416,7 +353,7 @@ export const add_knowledge_base: ToolDefinition = tool({
     }
 
     // Load current config
-    const config = loadEditableConfig();
+    const config = loadEditableConfig(sharedProjectRoot);
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
@@ -431,12 +368,12 @@ export const add_knowledge_base: ToolDefinition = tool({
     // Add the knowledge base
     knowledgeBases.push(resolvedPath);
     config.knowledgeBases = knowledgeBases;
-    saveConfig(config);
+    saveConfig(sharedProjectRoot, config);
     refreshIndexerFromConfig();
 
     let result = `${resolvedPath}\n`;
     result += `Total knowledge bases: ${knowledgeBases.length}\n`;
-    result += `Config saved to: ${getConfigPath()}\n`;
+    result += `Config saved to: ${getConfigPath(sharedProjectRoot)}\n`;
     result += `\nRun /index to rebuild the index with the new knowledge base.`;
 
     return result;
@@ -448,7 +385,7 @@ export const list_knowledge_bases: ToolDefinition = tool({
     "List all configured knowledge base folders that are indexed alongside the main project.",
   args: {},
   async execute() {
-    const config = loadRuntimeConfig();
+    const config = loadRuntimeConfig(sharedProjectRoot);
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
@@ -476,7 +413,7 @@ export const list_knowledge_bases: ToolDefinition = tool({
       result += "\n";
     }
 
-    result += `Config file: ${getConfigPath()}`;
+    result += `Config file: ${getConfigPath(sharedProjectRoot)}`;
     return result;
   },
 });
@@ -491,7 +428,7 @@ export const remove_knowledge_base: ToolDefinition = tool({
     const inputPath = args.path.trim();
 
     // Load current config
-    const config = loadEditableConfig();
+    const config = loadEditableConfig(sharedProjectRoot);
     const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
       ? config.knowledgeBases as string[]
       : [];
@@ -514,12 +451,12 @@ export const remove_knowledge_base: ToolDefinition = tool({
 
     const removed = knowledgeBases.splice(index, 1)[0];
     config.knowledgeBases = knowledgeBases;
-    saveConfig(config);
+    saveConfig(sharedProjectRoot, config);
     refreshIndexerFromConfig();
 
     let result = `Removed: ${removed}\n\n`;
     result += `Remaining knowledge bases: ${knowledgeBases.length}\n`;
-    result += `Config saved to: ${getConfigPath()}\n`;
+    result += `Config saved to: ${getConfigPath(sharedProjectRoot)}\n`;
     result += `\nRun /index to rebuild the index without the removed knowledge base.`;
 
     return result;
