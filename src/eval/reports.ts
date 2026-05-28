@@ -19,7 +19,13 @@ import type {
 
 export function loadSummary(summaryPath: string, options?: LoadSummaryOptions): EvalSummary {
   const raw = readFileSync(summaryPath, "utf-8");
-  return validateSummary(JSON.parse(raw) as EvalSummary, summaryPath, options);
+
+  try {
+    return validateSummary(JSON.parse(raw) as EvalSummary, summaryPath, options);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse eval summary JSON at ${summaryPath}: ${message}`);
+  }
 }
 
 export function createRunDirectory(outputRoot: string, timestampOverride?: string): string {

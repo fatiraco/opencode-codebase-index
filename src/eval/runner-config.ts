@@ -75,21 +75,25 @@ function normalizeEvalConfigKnowledgeBases(
     ? { ...(rawConfig as Record<string, unknown>) }
     : {};
 
-  if (!Array.isArray(config.knowledgeBases)) {
-    return config;
-  }
-
-  config.knowledgeBases = isProjectScopedConfigPath(resolvedConfigPath)
+  const rebaseEntries = (values: unknown): string[] => isProjectScopedConfigPath(resolvedConfigPath)
     ? resolveInheritedKnowledgeBaseEntries(
-        config.knowledgeBases,
+        values,
         path.dirname(path.dirname(resolvedConfigPath)),
         projectRoot,
       )
     : rebasePathEntries(
-        config.knowledgeBases,
+        values,
         path.dirname(resolvedConfigPath),
         projectRoot,
       );
+
+  if (Array.isArray(config.knowledgeBases)) {
+    config.knowledgeBases = rebaseEntries(config.knowledgeBases);
+  }
+
+  if (Array.isArray(config.additionalInclude)) {
+    config.additionalInclude = rebaseEntries(config.additionalInclude);
+  }
 
   return config;
 }

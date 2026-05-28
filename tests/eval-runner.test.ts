@@ -472,6 +472,7 @@ describe("eval runner", () => {
           indexing: {
             watchFiles: false,
           },
+          additionalInclude: ["../docs/**/*.md"],
           knowledgeBases: ["../external-kb"],
           search: {
             maxResults: 10,
@@ -542,10 +543,28 @@ describe("eval runner", () => {
     const localEvalConfig = JSON.parse(
       readFileSync(path.join(worktreeDir, ".opencode", "codebase-index.json"), "utf-8")
     ) as {
+      additionalInclude?: string[];
       knowledgeBases?: string[];
     };
 
+    expect(localEvalConfig.additionalInclude).toEqual(["../main-repo/docs/**/*.md"]);
     expect(localEvalConfig.knowledgeBases).toEqual(["../main-repo/external-kb"]);
+  });
+
+  it("includes the baseline path when eval summary JSON is malformed", async () => {
+    const brokenBaselinePath = path.join(tempDir, "benchmarks", "baselines", "broken-summary.json");
+    writeFileSync(brokenBaselinePath, '{"generatedAt":"2026-01-01T00:00:00.000Z",', "utf-8");
+
+    await expect(
+      runEvaluation({
+        projectRoot: tempDir,
+        datasetPath: "benchmarks/golden/small.json",
+        outputRoot: "benchmarks/results",
+        againstPath: path.relative(tempDir, brokenBaselinePath),
+        ciMode: false,
+        reindex: false,
+      })
+    ).rejects.toThrow(new RegExp(`Failed to parse eval summary JSON at ${brokenBaselinePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 
   it("rematerializes the local eval config when repeated reindex runs use different explicit config paths", async () => {
