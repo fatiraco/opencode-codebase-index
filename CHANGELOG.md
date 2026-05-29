@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Subsystem module splits**: Split large config, embeddings, eval, MCP, watcher, git, tools, routing, and utility modules into smaller focused files while preserving public entrypoints (#92).
 - **AI slop removal**: Trimmed redundant comments and small wrapper noise across config, eval, runtime, indexer, tools, and utils with behavior-neutral refactors (#93).
 
+- **Remove SiliconFlow default**: The custom reranker no longer falls back to a Chinese endpoint (`api.siliconflow.cn`). A `baseUrl` is now required for the `custom` reranker provider. README examples updated to use Cohere and generic env-var placeholders.
 ### Fixed
 - **SSRF protection for custom embedding provider**: Custom provider URLs are now validated against cloud metadata endpoints (169.254.x.x, metadata.google.internal) and non-HTTP protocols to prevent server-side request forgery via malicious config files.
 - **Knowledge base path restrictions**: `add_knowledge_base` now blocks sensitive system directories (`/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/root`, `/var/run`, `/var/log`) and home dotdirs (`.ssh`, `.gnupg`, `.aws`, `.config/gcloud`, `.docker`, `.kube`). Symlinks are resolved before checking.

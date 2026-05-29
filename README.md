@@ -433,10 +433,10 @@ Global-level config (`~/.config/opencode/codebase-index.json`):
 {
   "embeddingProvider": "custom",
   "customProvider": {
-    "baseUrl": "https://api.siliconflow.cn/v1",
+    "baseUrl": "{env:EMBED_BASE_URL}",
     "model": "BAAI/bge-m3",
     "dimensions": 1024,
-    "apiKey": "{env:SILICONFLOW_API_KEY}"
+    "apiKey": "{env:EMBED_API_KEY}"
   }
 }
 ```
@@ -460,9 +460,9 @@ Add to your config (`.opencode/codebase-index.json` or global config):
 {
   "reranker": {
     "enabled": true,
-    "baseUrl": "https://api.siliconflow.cn/v1",
-    "model": "BAAI/bge-reranker-v2-m3",
-    "apiKey": "{env:SILICONFLOW_API_KEY}",
+    "baseUrl": "https://api.cohere.ai/v1",
+    "model": "rerank-v3.5",
+    "apiKey": "{env:RERANK_API_KEY}",
     "topN": 20
   }
 }
@@ -512,10 +512,10 @@ Zero-config by default (uses `auto` mode). Customize in `.opencode/codebase-inde
 
   // === Custom Embedding API (when embeddingProvider is "custom") ===
   "customProvider": {
-    "baseUrl": "https://api.siliconflow.cn/v1",
+    "baseUrl": "{env:EMBED_BASE_URL}",
     "model": "BAAI/bge-m3",
     "dimensions": 1024,
-    "apiKey": "{env:SILICONFLOW_API_KEY}",
+    "apiKey": "{env:EMBED_API_KEY}",
     "maxTokens": 8192,                        // Max tokens per input text
     "timeoutMs": 30000,                       // Request timeout (ms)
     "concurrency": 3,                         // Max concurrent requests
