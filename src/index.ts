@@ -76,9 +76,9 @@ interface ChatTransformOutput {
   developer?: string[];
 }
 
-const plugin: Plugin = async ({ directory }) => {
+const plugin: Plugin = async ({ directory, worktree }) => {
   try {
-    const projectRoot = directory;
+    const projectRoot = worktree || directory;
     const rawConfig = loadMergedConfig(projectRoot);
     const config = parseConfig(rawConfig);
 
