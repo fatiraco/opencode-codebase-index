@@ -1431,6 +1431,7 @@ pub fn find_shortest_path(
                 }
             } else {
                 // Unresolved: try resolving by target_name
+                // Only traverse if unambiguous (single match) to avoid fabricating paths
                 let resolved: Vec<(String, String, String, u32)> = resolve_stmt
                     .query_map(params![branch, &callee_target_name], |row| {
                         Ok((
@@ -1443,8 +1444,11 @@ pub fn find_shortest_path(
                     .filter_map(|r| r.ok())
                     .collect();
 
-                for (resolved_id, _name, _fp, _line) in resolved {
-                    if !visited.contains_key(&resolved_id) {
+                // Only traverse unambiguous (single) resolution to avoid fabricating paths
+                // through implementations the call graph never actually resolved
+                if resolved.len() == 1 {
+                    let (resolved_id, _name, _fp, _line) = &resolved[0];
+                    if !visited.contains_key(resolved_id) {
                         visited.insert(
                             resolved_id.clone(),
                             (current_id.clone(), call_type.clone(), line),

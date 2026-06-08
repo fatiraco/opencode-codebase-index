@@ -4876,15 +4876,16 @@ export class Indexer {
 
   async findCallPath(fromName: string, toName: string, maxDepth?: number): Promise<PathHopData[]> {
     const { database } = await this.ensureInitialized();
+    let shortest: PathHopData[] = [];
 
     for (const branchKey of this.getBranchCatalogKeys()) {
       const path = database.findShortestPath(fromName, toName, branchKey, maxDepth);
-      if (path.length > 0) {
-        return path;
+      if (path.length > 0 && (shortest.length === 0 || path.length < shortest.length)) {
+        shortest = path;
       }
     }
 
-    return [];
+    return shortest;
   }
 
   async close(): Promise<void> {
