@@ -1298,6 +1298,12 @@ pub fn find_shortest_path(
         return Ok(Vec::new());
     }
 
+    // Ambiguous source: multiple symbols match from_name on this branch.
+    // We cannot determine which one the user means, so report no path.
+    if starts.len() > 1 {
+        return Ok(Vec::new());
+    }
+
     // Prepare statements for BFS expansion
     // Get callees of a symbol (by symbol_id), filtered by branch
     let mut callees_stmt = conn.prepare(
@@ -1395,8 +1401,8 @@ pub fn find_shortest_path(
                         target_found = Some(target_id);
                         break 'bfs;
                     }
-                } else {
-                    // Ambiguous or no symbol found — use a synthetic ID
+                } else if resolved_targets.is_empty() {
+                    // No symbol found at all (external/unindexed target) — use synthetic ID
                     let synthetic_id = format!("__target__{}", callee_target_name);
                     if !visited.contains_key(&synthetic_id) {
                         visited.insert(
@@ -1407,6 +1413,8 @@ pub fn find_shortest_path(
                         break 'bfs;
                     }
                 }
+                // else: ambiguous target (multiple matches, none resolved) — skip,
+                // no proven path to a specific symbol
             }
 
             // If resolved, continue BFS through the resolved symbol (verify it's on branch)

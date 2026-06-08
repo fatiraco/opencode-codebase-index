@@ -1604,13 +1604,9 @@ const math = @import("math.zig");
         isResolved: false,
       });
 
-      // Should still find a path, but use synthetic target (ambiguous)
+      // Ambiguous target (multiple symbols named "handler") should return no path
       const result = db.findShortestPath("caller", "handler", "main");
-      expect(result.length).toBe(2);
-      expect(result[0].symbolName).toBe("caller");
-      expect(result[1].symbolName).toBe("handler");
-      // The target should be synthetic (empty filePath since ambiguous)
-      expect(result[1].filePath).toBe("");
+      expect(result.length).toBe(0);
     });
 
     it("should prefer edge to_symbol_id when it matches a resolved target", () => {
