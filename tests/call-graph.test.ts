@@ -1549,5 +1549,128 @@ const math = @import("math.zig");
       expect(result[1].symbolName).toBe("middle");
       expect(result[2].symbolName).toBe("target");
     });
+
+    it("should use synthetic target when multiple symbols share the target name (ambiguous)", () => {
+      const db = openDb();
+
+      // Create caller symbol
+      db.upsertSymbol({
+        id: "sym_caller_amb",
+        filePath: "src/caller.ts",
+        name: "caller",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+
+      // Create two symbols with the same name "handler" in different files
+      db.upsertSymbol({
+        id: "sym_handler_a",
+        filePath: "src/handler-a.ts",
+        name: "handler",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+      db.upsertSymbol({
+        id: "sym_handler_b",
+        filePath: "src/handler-b.ts",
+        name: "handler",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+
+      db.addSymbolsToBranch("main", ["sym_caller_amb", "sym_handler_a", "sym_handler_b"]);
+
+      // Unresolved edge from caller to "handler" (no to_symbol_id)
+      db.upsertCallEdge({
+        id: "edge_ambiguous",
+        fromSymbolId: "sym_caller_amb",
+        targetName: "handler",
+        toSymbolId: undefined,
+        callType: "Call",
+        line: 5,
+        col: 0,
+        isResolved: false,
+      });
+
+      // Should still find a path, but use synthetic target (ambiguous)
+      const result = db.findShortestPath("caller", "handler", "main");
+      expect(result.length).toBe(2);
+      expect(result[0].symbolName).toBe("caller");
+      expect(result[1].symbolName).toBe("handler");
+      // The target should be synthetic (empty filePath since ambiguous)
+      expect(result[1].filePath).toBe("");
+    });
+
+    it("should prefer edge to_symbol_id when it matches a resolved target", () => {
+      const db = openDb();
+
+      db.upsertSymbol({
+        id: "sym_src",
+        filePath: "src/src.ts",
+        name: "source",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+      db.upsertSymbol({
+        id: "sym_dest_a",
+        filePath: "src/dest-a.ts",
+        name: "dest",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+      db.upsertSymbol({
+        id: "sym_dest_b",
+        filePath: "src/dest-b.ts",
+        name: "dest",
+        kind: "function",
+        startLine: 1,
+        startCol: 0,
+        endLine: 10,
+        endCol: 0,
+        language: "typescript",
+      });
+
+      db.addSymbolsToBranch("main", ["sym_src", "sym_dest_a", "sym_dest_b"]);
+
+      // Resolved edge pointing specifically to dest_b
+      db.upsertCallEdge({
+        id: "edge_resolved_dest",
+        fromSymbolId: "sym_src",
+        targetName: "dest",
+        toSymbolId: "sym_dest_b",
+        callType: "Call",
+        line: 5,
+        col: 0,
+        isResolved: true,
+      });
+
+      const result = db.findShortestPath("source", "dest", "main");
+      expect(result.length).toBe(2);
+      expect(result[0].symbolName).toBe("source");
+      expect(result[1].symbolName).toBe("dest");
+      // Should use the specific resolved target (dest_b), not arbitrary first match
+      expect(result[1].filePath).toBe("src/dest-b.ts");
+      expect(result[1].symbolId).toBe("sym_dest_b");
+    });
   });
 });

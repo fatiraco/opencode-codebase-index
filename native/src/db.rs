@@ -1355,7 +1355,7 @@ pub fn find_shortest_path(
         for (callee_target_name, to_symbol_id, call_type, line) in callees {
             // Check if target_name matches our target (case-insensitive)
             if callee_target_name.to_lowercase() == target_name_lower {
-                // Resolve the target to a real symbol on this branch
+                // Resolve the target to real symbol(s) on this branch
                 let resolved_targets: Vec<(String, String, String, u32)> = resolve_stmt
                     .query_map(params![branch, to_name], |row| {
                         Ok((
@@ -1368,17 +1368,35 @@ pub fn find_shortest_path(
                     .filter_map(|r| r.ok())
                     .collect();
 
-                if let Some((target_id, ..)) = resolved_targets.first() {
-                    if !visited.contains_key(target_id) {
+                // Determine which target to use:
+                // 1. If edge has to_symbol_id and it's among resolved targets, use it
+                // 2. If exactly one resolved target (unambiguous), use it
+                // 3. Otherwise ambiguous — use synthetic target (consistent with
+                //    existing call-graph behavior that keeps ambiguous targets unresolved)
+                let chosen_target_id: Option<String> = if let Some(ref edge_resolved) = to_symbol_id
+                {
+                    if resolved_targets.iter().any(|(id, ..)| id == edge_resolved) {
+                        Some(edge_resolved.clone())
+                    } else {
+                        None
+                    }
+                } else if resolved_targets.len() == 1 {
+                    Some(resolved_targets[0].0.clone())
+                } else {
+                    None
+                };
+
+                if let Some(target_id) = chosen_target_id {
+                    if !visited.contains_key(&target_id) {
                         visited.insert(
                             target_id.clone(),
                             (current_id.clone(), call_type.clone(), line),
                         );
-                        target_found = Some(target_id.clone());
+                        target_found = Some(target_id);
                         break 'bfs;
                     }
                 } else {
-                    // Target name matches but no symbol found - use a synthetic ID
+                    // Ambiguous or no symbol found — use a synthetic ID
                     let synthetic_id = format!("__target__{}", callee_target_name);
                     if !visited.contains_key(&synthetic_id) {
                         visited.insert(
