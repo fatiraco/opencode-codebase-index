@@ -32,7 +32,7 @@ import {
   parseFileAsText,
   estimateTokens,
 } from "../native/index.js";
-import type { SymbolData, CallEdgeData } from "../native/index.js";
+import type { SymbolData, CallEdgeData, PathHopData } from "../native/index.js";
 import { getBranchOrDefault, getBaseBranch, isGitRepo } from "../git/index.js";
 import { resolveProjectIndexPath } from "../config/paths.js";
 
@@ -4872,6 +4872,19 @@ export class Indexer {
     }
 
     return results;
+  }
+
+  async findCallPath(fromName: string, toName: string, maxDepth?: number): Promise<PathHopData[]> {
+    const { database } = await this.ensureInitialized();
+
+    for (const branchKey of this.getBranchCatalogKeys()) {
+      const path = database.findShortestPath(fromName, toName, branchKey, maxDepth);
+      if (path.length > 0) {
+        return path;
+      }
+    }
+
+    return [];
   }
 
   async close(): Promise<void> {
