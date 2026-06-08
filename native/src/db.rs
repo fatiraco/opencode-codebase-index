@@ -1450,11 +1450,8 @@ pub fn find_shortest_path(
     let mut path: Vec<PathHopRow> = Vec::new();
     let mut current = end_id;
 
-    loop {
-        let (parent_id, call_type, _line) = match visited.get(&current) {
-            Some(entry) => entry.clone(),
-            None => break,
-        };
+    while let Some(entry) = visited.get(&current) {
+        let (parent_id, call_type, _line) = entry.clone();
 
         // Look up symbol info
         let info: Option<(String, String, String, u32)> = if current.starts_with("__target__") {
