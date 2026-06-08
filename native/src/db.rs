@@ -1343,10 +1343,10 @@ pub fn find_shortest_path(
         let callees: Vec<(String, Option<String>, String, u32)> = callees_stmt
             .query_map(params![branch, &current_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,  // target_name
+                    row.get::<_, String>(0)?,         // target_name
                     row.get::<_, Option<String>>(1)?, // to_symbol_id
-                    row.get::<_, String>(2)?,  // call_type
-                    row.get::<_, u32>(3)?,     // line
+                    row.get::<_, String>(2)?,         // call_type
+                    row.get::<_, u32>(3)?,            // line
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -1444,9 +1444,8 @@ pub fn find_shortest_path(
     };
 
     // Build symbol info lookup
-    let mut info_stmt = conn.prepare(
-        "SELECT id, name, file_path, start_line FROM symbols WHERE id = ?",
-    )?;
+    let mut info_stmt =
+        conn.prepare("SELECT id, name, file_path, start_line FROM symbols WHERE id = ?")?;
 
     let mut path: Vec<PathHopRow> = Vec::new();
     let mut current = end_id;
