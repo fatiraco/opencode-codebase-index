@@ -1953,7 +1953,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "4");
+        assert_eq!(version, "5");
     }
 
     #[test]
@@ -2198,6 +2198,7 @@ mod tests {
             target_name: "helper".to_string(),
             to_symbol_id: None,
             call_type: "Call".to_string(),
+            confidence: "Direct".to_string(),
             line: 5,
             col: 4,
             is_resolved: false,
@@ -2314,6 +2315,7 @@ mod tests {
                 target_name: "something".to_string(),
                 to_symbol_id: None,
                 call_type: "Call".to_string(),
+                confidence: "Direct".to_string(),
                 line: 3,
                 col: 4,
                 is_resolved: false,
@@ -2324,6 +2326,7 @@ mod tests {
                 target_name: "other".to_string(),
                 to_symbol_id: None,
                 call_type: "Call".to_string(),
+                confidence: "Direct".to_string(),
                 line: 2,
                 col: 0,
                 is_resolved: false,
@@ -2385,6 +2388,7 @@ mod tests {
             target_name: "target".to_string(),
             to_symbol_id: None,
             call_type: "Call".to_string(),
+            confidence: "Direct".to_string(),
             line: 2,
             col: 0,
             is_resolved: false,
@@ -2432,6 +2436,7 @@ mod tests {
             target_name: "foo".to_string(),
             to_symbol_id: None,
             call_type: "Call".to_string(),
+            confidence: "Direct".to_string(),
             line: 3,
             col: 0,
             is_resolved: false,
@@ -2518,7 +2523,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema_version, "4");
+        assert_eq!(schema_version, "5");
 
         let on_delete: String = conn
             .query_row("PRAGMA foreign_key_list(call_edges)", [], |row| row.get(6))
@@ -2589,6 +2594,7 @@ mod tests {
             target_name: "target".to_string(),
             to_symbol_id: None,
             call_type: "Call".to_string(),
+            confidence: "Direct".to_string(),
             line: 5,
             col: 2,
             is_resolved: false,
