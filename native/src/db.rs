@@ -224,7 +224,7 @@ fn migrate_schema(conn: &Connection, from_version: i32) -> DbResult<()> {
     // through the v3 migration with old code (which didn't include confidence).
     // Fresh installs and upgrades from v2 or below already have the column
     // from the modified v2/v3 CREATE TABLE statements above.
-    if from_version >= 3 && from_version < 5 {
+    if (3..5).contains(&from_version) {
         conn.execute_batch(
             r#"
             ALTER TABLE call_edges ADD COLUMN confidence TEXT NOT NULL DEFAULT 'Direct';
