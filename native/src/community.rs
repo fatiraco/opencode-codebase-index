@@ -415,7 +415,9 @@ pub fn detect_communities(
     }
 
     let mut results = Vec::new();
-    for (idx, (label, members)) in communities.into_iter().enumerate() {
+    let mut sorted_communities: Vec<(String, Vec<String>)> = communities.into_iter().collect();
+    sorted_communities.sort_by(|a, b| a.0.cmp(&b.0));
+    for (idx, (label, members)) in sorted_communities.into_iter().enumerate() {
         let community_id = idx as u32;
 
         // Find highest-degree symbol in community

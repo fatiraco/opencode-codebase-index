@@ -1878,6 +1878,15 @@ export class Indexer {
     return `${projectHash}:${branchName}`;
   }
 
+  private getBranchCatalogKeyFor(branchName: string): string {
+    if (this.config.scope !== "global") {
+      return branchName;
+    }
+
+    const projectHash = hashContent(path.resolve(this.projectRoot)).slice(0, 16);
+    return `${projectHash}:${branchName}`;
+  }
+
   private getLegacyBranchCatalogKey(): string {
     return this.currentBranch || "default";
   }
@@ -4955,8 +4964,9 @@ export class Indexer {
     }
 
     const resolvedBranch = headRefName || opts.branch || this.currentBranch;
+    const branchKey = this.getBranchCatalogKeyFor(resolvedBranch || "default");
 
-    const branchSymbols = database.getSymbolsForBranch(resolvedBranch);
+    const branchSymbols = database.getSymbolsForBranch(branchKey);
     if (branchSymbols.length === 0) {
       throw new Error(
         "Run index_codebase first to build the call graph and symbol index for this branch."
@@ -4964,14 +4974,14 @@ export class Indexer {
     }
 
     const absoluteChangedFiles = changedFiles.map((f) => path.resolve(this.projectRoot, f));
-    const directSymbols = database.getSymbolsForFiles(absoluteChangedFiles, resolvedBranch);
+    const directSymbols = database.getSymbolsForFiles(absoluteChangedFiles, branchKey);
     const directIds = directSymbols.map((s) => s.id);
 
     const direction = opts.direction ?? "both";
     const maxDepth = opts.maxDepth ?? 5;
     const transitiveCallers = database.getTransitiveReachability(
       directIds,
-      resolvedBranch,
+      branchKey,
       direction,
       maxDepth
     );
@@ -4982,7 +4992,7 @@ export class Indexer {
     }
     const allAffectedIds = Array.from(affectedIdsSet);
 
-    const communitiesData = database.detectCommunities(resolvedBranch, allAffectedIds);
+    const communitiesData = database.detectCommunities(branchKey, allAffectedIds);
     const communityMap = new Map<string, { label: string; symbolCount: number; directSymbols: Set<string> }>();
     for (const c of communitiesData) {
       if (!communityMap.has(c.communityLabel)) {
@@ -5004,7 +5014,7 @@ export class Indexer {
       directSymbols: Array.from(c.directSymbols),
     }));
 
-    const centralityData = database.computeCentrality(resolvedBranch);
+    const centralityData = database.computeCentrality(branchKey);
     const hubThreshold = opts.hubThreshold ?? 10;
     const hubNodes = centralityData
       .filter((c) => directIds.includes(c.symbolId) && c.callerCount >= hubThreshold)
@@ -5042,7 +5052,7 @@ export class Indexer {
         const openPRs = JSON.parse(stdout) as Array<{ number: number; headRefName: string }>;
 
         const currentCommunityLabels = new Set(communities.map((c) => c.label));
-        const allCommunitiesData = database.detectCommunities(resolvedBranch);
+        const allCommunitiesData = database.detectCommunities(branchKey);
         const symbolToCommunity = new Map<string, string>();
         const structuralKey = (filePath: string, name: string): string =>
           `${filePath.toLowerCase()}:${name.toLowerCase()}`;
@@ -5060,7 +5070,8 @@ export class Indexer {
               baseBranch: this.baseBranch,
             });
             const otherAbsolute = otherChanged.files.map((f) => path.resolve(this.projectRoot, f));
-            const otherSymbols = database.getSymbolsForFiles(otherAbsolute, openPr.headRefName);
+            const otherBranchKey = this.getBranchCatalogKeyFor(openPr.headRefName);
+            const otherSymbols = database.getSymbolsForFiles(otherAbsolute, otherBranchKey);
             const otherLabels = new Set<string>();
             for (const sym of otherSymbols) {
               const label = symbolToCommunity.get(structuralKey(sym.filePath, sym.name));
