@@ -15,12 +15,58 @@ export interface CombinedWatcher {
   stop(): void;
 }
 
+class BackgroundReindexer {
+  private running = false;
+  private pending = false;
+  private stopped = false;
+
+  constructor(private readonly runIndex: () => Promise<void>) {}
+
+  request(): void {
+    if (this.stopped) {
+      return;
+    }
+
+    this.pending = true;
+    this.drain();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.pending = false;
+  }
+
+  private drain(): void {
+    if (this.stopped || this.running || !this.pending) {
+      return;
+    }
+
+    this.pending = false;
+    this.running = true;
+    void this.run();
+  }
+
+  private async run(): Promise<void> {
+    try {
+      await this.runIndex();
+    } catch (error) {
+      console.error("[codebase-index] Background reindex failed:", error);
+    } finally {
+      this.running = false;
+      this.drain();
+    }
+  }
+}
+
 export function createWatcherWithIndexer(
   getIndexer: () => Indexer,
   projectRoot: string,
   config: CodebaseIndexConfig
 ): CombinedWatcher {
   const fileWatcher = new FileWatcher(projectRoot, config);
+  const backgroundReindexer = new BackgroundReindexer(async () => {
+    await getIndexer().index();
+  });
 
   fileWatcher.start(async (changes) => {
     const hasAddOrChange = changes.some(
@@ -29,7 +75,7 @@ export function createWatcherWithIndexer(
     const hasDelete = changes.some((c) => c.type === "unlink");
 
     if (hasAddOrChange || hasDelete) {
-      await getIndexer().index();
+      backgroundReindexer.request();
     }
   });
 
@@ -39,7 +85,7 @@ export function createWatcherWithIndexer(
     gitWatcher = new GitHeadWatcher(projectRoot);
     gitWatcher.start(async (oldBranch, newBranch) => {
       console.log(`Branch changed: ${oldBranch ?? "(none)"} -> ${newBranch}`);
-      await getIndexer().index();
+      backgroundReindexer.request();
     });
   }
 
@@ -47,6 +93,7 @@ export function createWatcherWithIndexer(
     fileWatcher,
     gitWatcher,
     stop() {
+      backgroundReindexer.stop();
       fileWatcher.stop();
       gitWatcher?.stop();
     },
