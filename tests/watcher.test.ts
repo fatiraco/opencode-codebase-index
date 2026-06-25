@@ -14,7 +14,6 @@ const createTestConfig = (overrides: Partial<ParsedCodebaseIndexConfig> = {}): P
   indexing: {
     autoIndex: false,
     watchFiles: true,
-    concurrentReindexRuns: 1,
     maxFileSize: 1048576,
     maxChunksPerFile: 100,
     semanticOnly: false,
@@ -197,39 +196,6 @@ describe("FileWatcher", () => {
 
       combinedWatcher.stop();
       pendingResolves[1]?.();
-    });
-
-    it("honors configured concurrent file-triggered reindex runs", async () => {
-      vi.setConfig({ testTimeout: 6000 });
-      const pendingResolves: Array<() => void> = [];
-      const indexer = {
-        index: vi.fn(() => new Promise<void>((resolve) => {
-          pendingResolves.push(resolve);
-        })),
-      };
-      const config = createTestConfig();
-      config.indexing.concurrentReindexRuns = 2;
-      const combinedWatcher = createWatcherWithIndexer(
-        () => indexer,
-        tempDir,
-        config
-      );
-
-      await new Promise((r) => setTimeout(r, 100));
-      fs.writeFileSync(path.join(tempDir, "src", "parallel-one.ts"), "export const one = 1;");
-      await vi.waitFor(() => expect(indexer.index).toHaveBeenCalledTimes(1), { timeout: 2500 });
-      fs.writeFileSync(path.join(tempDir, "src", "parallel-two.ts"), "export const two = 2;");
-      await vi.waitFor(() => expect(indexer.index).toHaveBeenCalledTimes(2), { timeout: 2500 });
-      fs.writeFileSync(path.join(tempDir, "src", "parallel-three.ts"), "export const three = 3;");
-      await new Promise((r) => setTimeout(r, 1500));
-
-      expect(indexer.index).toHaveBeenCalledTimes(2);
-      pendingResolves[0]?.();
-      await vi.waitFor(() => expect(indexer.index).toHaveBeenCalledTimes(3));
-
-      combinedWatcher.stop();
-      pendingResolves[1]?.();
-      pendingResolves[2]?.();
     });
 
     it("uses the latest indexer instance for file-triggered reindexing", async () => {

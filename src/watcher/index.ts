@@ -15,45 +15,35 @@ export interface CombinedWatcher {
   stop(): void;
 }
 
-function normalizeReindexConcurrency(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.min(4, Math.max(1, Math.floor(value)));
-}
-
 class BackgroundReindexer {
-  private runningCount = 0;
-  private pendingCount = 0;
+  private running = false;
+  private pending = false;
   private stopped = false;
 
-  constructor(
-    private readonly runIndex: () => Promise<void>,
-    private readonly concurrency: number
-  ) {}
+  constructor(private readonly runIndex: () => Promise<void>) {}
 
   request(): void {
     if (this.stopped) {
       return;
     }
 
-    this.pendingCount = this.runningCount < this.concurrency
-      ? this.pendingCount + 1
-      : Math.max(this.pendingCount, 1);
+    this.pending = true;
     this.drain();
   }
 
   stop(): void {
     this.stopped = true;
-    this.pendingCount = 0;
+    this.pending = false;
   }
 
   private drain(): void {
-    while (!this.stopped && this.pendingCount > 0 && this.runningCount < this.concurrency) {
-      this.pendingCount -= 1;
-      this.runningCount += 1;
-      void this.run();
+    if (this.stopped || this.running || !this.pending) {
+      return;
     }
+
+    this.pending = false;
+    this.running = true;
+    void this.run();
   }
 
   private async run(): Promise<void> {
@@ -62,7 +52,7 @@ class BackgroundReindexer {
     } catch (error) {
       console.error("[codebase-index] Background reindex failed:", error);
     } finally {
-      this.runningCount -= 1;
+      this.running = false;
       this.drain();
     }
   }
@@ -76,7 +66,7 @@ export function createWatcherWithIndexer(
   const fileWatcher = new FileWatcher(projectRoot, config);
   const backgroundReindexer = new BackgroundReindexer(async () => {
     await getIndexer().index();
-  }, normalizeReindexConcurrency(config.indexing?.concurrentReindexRuns));
+  });
 
   fileWatcher.start(async (changes) => {
     const hasAddOrChange = changes.some(
