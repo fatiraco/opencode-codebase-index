@@ -3,23 +3,29 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as path from "path";
 
 import { parseConfig } from "./config/schema.js";
+import { parseHostMode, type HostMode } from "./config/host.js";
 import { handleEvalCommand } from "./eval/cli.js";
 import { createMcpServer } from "./mcp-server.js";
 import { loadMergedConfig } from "./config/merger.js";
 
-function parseArgs(argv: string[]): { project: string; config?: string } {
+function parseArgs(argv: string[]): { project: string; config?: string; host: HostMode } {
   let project = process.cwd();
   let config: string | undefined;
+  let host: HostMode = "opencode";
 
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === "--project" && argv[i + 1]) {
       project = path.resolve(argv[++i]);
     } else if (argv[i] === "--config" && argv[i + 1]) {
       config = path.resolve(argv[++i]);
+    } else if (argv[i] === "--host" && argv[i + 1]) {
+      host = parseHostMode(argv[++i]);
+    } else if (argv[i] === "--host") {
+      host = parseHostMode(undefined);
     }
   }
 
-  return { project, config };
+  return { project, config, host };
 }
 
 async function main(): Promise<void> {
@@ -29,10 +35,10 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(process.argv);
-  const rawConfig = loadMergedConfig(args.project);
+  const rawConfig = loadMergedConfig(args.project, args.host);
   const config = parseConfig(rawConfig);
 
-  const server = createMcpServer(args.project, config);
+  const server = createMcpServer(args.project, config, args.host);
   const transport = new StdioServerTransport();
 
   await server.connect(transport);
@@ -46,7 +52,17 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((_error: unknown) => {
-  console.error("Fatal: failed to start MCP server (check config and network)");
+main().catch((error: unknown) => {
+  if (error instanceof Error && error.message.startsWith("Invalid host mode")) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
+  if (error instanceof Error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
+  console.error("Fatal: failed to start MCP server");
   process.exit(1);
 });
