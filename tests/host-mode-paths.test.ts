@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMergedConfig } from "../src/config/merger.js";
 import {
   resolveGlobalConfigPath,
@@ -14,15 +14,20 @@ import {
 
 describe("host-aware path resolution", () => {
   let tempDir: string;
+  let homeDir: string;
   let mainRepoDir: string;
   let worktreeDir: string;
   let worktreeGitDir: string;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-mode-paths-"));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-mode-home-"));
     mainRepoDir = path.join(tempDir, "main-repo");
     worktreeDir = path.join(tempDir, "worktree-feature");
     worktreeGitDir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+
+    vi.stubEnv("HOME", homeDir);
+    vi.stubEnv("USERPROFILE", homeDir);
 
     fs.mkdirSync(path.join(mainRepoDir, ".git", "refs", "heads", "feature", "x"), { recursive: true });
     fs.mkdirSync(mainRepoDir, { recursive: true });
@@ -40,6 +45,8 @@ describe("host-aware path resolution", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -90,7 +97,6 @@ describe("host-aware path resolution", () => {
   });
 
   it("falls back to legacy global config for codex host when codex-native global config is absent", () => {
-    const homeDir = os.homedir();
     fs.mkdirSync(path.join(homeDir, ".config", "opencode"), { recursive: true });
     fs.writeFileSync(
       path.join(homeDir, ".config", "opencode", "codebase-index.json"),
@@ -124,7 +130,6 @@ describe("host-aware path resolution", () => {
   });
 
   it("falls back to legacy global index for codex host when codex-native global index is absent", () => {
-    const homeDir = os.homedir();
     fs.mkdirSync(path.join(homeDir, ".opencode", "global-index"), { recursive: true });
 
     expect(resolveGlobalIndexPath("codex")).toBe(path.join(homeDir, ".opencode", "global-index"));
