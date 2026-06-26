@@ -66,17 +66,22 @@
 ## 🧩 Codex Plugin
 Install once for Codex threads and get skill guidance plus MCP tools in one manifest.
 
-1. **Install the plugin from the marketplace**
+1. **Add this repo as a marketplace source**
    ```bash
-   codex plugin add codebase-index
+   codex plugin marketplace add Helweg/opencode-codebase-index
    ```
-2. **Restart or open a new thread** in the target workspace.
-3. Use MCP tools (`index_codebase`, `index_status`, `codebase_search`, etc.) and the `codebase-search` skill guidance.
+2. **Install the plugin**
+   ```bash
+   codex plugin add codebase-index@helweg-plugins
+   ```
+3. **Restart or open a new thread** in the target workspace.
+4. Use MCP tools (`index_codebase`, `index_status`, `codebase_search`, etc.) and the `codebase-search` skill guidance.
 
 The plugin includes:
 - `skills/` guidance for local workflows
 - `hooks/hooks.json` lightweight session-start guidance
 - `.mcp.json` with `--host codex`
+- `.agents/plugins/marketplace.json` so this repo can act as a Codex marketplace source
 
 ### Provider selection notes
 
