@@ -4338,8 +4338,15 @@ export class Indexer {
       return;
     }
 
-    const localProjectIndexPath = path.join(this.projectRoot, getHostProjectIndexRelativePath(this.host));
-    if (path.resolve(this.indexPath) !== path.resolve(localProjectIndexPath)) {
+    const localProjectIndexPaths = [path.join(this.projectRoot, getHostProjectIndexRelativePath(this.host))];
+    if (this.host !== "opencode") {
+      localProjectIndexPaths.push(path.join(this.projectRoot, getHostProjectIndexRelativePath("opencode")));
+    }
+
+    const isLocalProjectIndex = localProjectIndexPaths.some(
+      (localPath) => path.resolve(this.indexPath) === path.resolve(localPath)
+    );
+    if (!isLocalProjectIndex) {
       throw new Error(
         "Project-scoped force rebuild is unsafe while using an inherited worktree index. " +
         "Create a local project config boundary before clearing the index."
