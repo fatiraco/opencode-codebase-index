@@ -1,0 +1,57 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import * as os from "os";
+import * as path from "path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const operationMocks = vi.hoisted(() => ({
+  refreshIndexerForDirectory: vi.fn(),
+}));
+
+vi.mock("../src/tools/operations.js", () => ({
+  refreshIndexerForDirectory: operationMocks.refreshIndexerForDirectory,
+}));
+
+vi.mock("../src/git/index.js", () => ({
+  isGitRepo: vi.fn(() => false),
+}));
+
+import { parseConfig } from "../src/config/schema.js";
+import { createWatcherWithIndexer } from "../src/watcher/index.js";
+
+describe("watcher config refresh", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "watcher-config-refresh-"));
+    operationMocks.refreshIndexerForDirectory.mockClear();
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("refreshes the codex indexer cache before reindexing when codex config changes", async () => {
+    const indexer = {
+      index: vi.fn().mockResolvedValue(undefined),
+    };
+    const watcher = createWatcherWithIndexer(
+      () => indexer,
+      tempDir,
+      parseConfig({ include: ["**/*.ts"] }),
+      "codex",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    mkdirSync(path.join(tempDir, ".codebase-index"), { recursive: true });
+    writeFileSync(path.join(tempDir, ".codebase-index", "config.json"), JSON.stringify({ include: ["src/**/*.ts"] }));
+
+    await vi.waitFor(() => {
+      expect(operationMocks.refreshIndexerForDirectory).toHaveBeenCalledWith(tempDir, "codex");
+      expect(indexer.index).toHaveBeenCalledTimes(1);
+    }, { timeout: 2500 });
+
+    watcher.stop();
+  });
+});

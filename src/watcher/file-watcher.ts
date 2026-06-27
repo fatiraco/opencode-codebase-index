@@ -1,7 +1,9 @@
 import chokidar, { FSWatcher } from "chokidar";
 import * as path from "path";
 
+import type { HostMode } from "../config/host.js";
 import type { CodebaseIndexConfig } from "../config/schema.js";
+import { resolveWritableProjectConfigPath } from "../config/paths.js";
 import { createIgnoreFilter, shouldIncludeFile } from "../utils/files.js";
 import { hasFilteredPathSegment, isRestrictedDirectory } from "../utils/paths.js";
 
@@ -18,14 +20,16 @@ export class FileWatcher {
   private watcher: FSWatcher | null = null;
   private projectRoot: string;
   private config: CodebaseIndexConfig;
+  private host: HostMode;
   private pendingChanges: Map<string, FileChangeType> = new Map();
   private debounceTimer: NodeJS.Timeout | null = null;
   private debounceMs = 1000;
   private onChanges: ChangeHandler | null = null;
 
-  constructor(projectRoot: string, config: CodebaseIndexConfig) {
+  constructor(projectRoot: string, config: CodebaseIndexConfig, host: HostMode = "opencode") {
     this.projectRoot = projectRoot;
     this.config = config;
+    this.host = host;
   }
 
   start(handler: ChangeHandler): void {
@@ -40,6 +44,10 @@ export class FileWatcher {
       ignored: (filePath: string) => {
         const relativePath = path.relative(this.projectRoot, filePath);
         if (!relativePath) return false;
+
+        if (this.isProjectConfigPathOrAncestor(relativePath)) {
+          return false;
+        }
 
         if (hasFilteredPathSegment(relativePath, path.sep)) {
           return true;
@@ -78,6 +86,12 @@ export class FileWatcher {
   }
 
   private handleChange(type: FileChangeType, filePath: string): void {
+    if (this.isProjectConfigPath(filePath)) {
+      this.pendingChanges.set(filePath, type);
+      this.scheduleFlush();
+      return;
+    }
+
     const includePatterns = [...this.config.include, ...(this.config.additionalInclude ?? [])];
     if (
       !shouldIncludeFile(
@@ -93,6 +107,21 @@ export class FileWatcher {
 
     this.pendingChanges.set(filePath, type);
     this.scheduleFlush();
+  }
+
+  private isProjectConfigPath(filePath: string): boolean {
+    const relativePath = path.relative(this.projectRoot, filePath);
+    return path.normalize(relativePath) === this.getProjectConfigRelativePath();
+  }
+
+  private isProjectConfigPathOrAncestor(relativePath: string): boolean {
+    const normalizedRelativePath = path.normalize(relativePath);
+    const configRelativePath = this.getProjectConfigRelativePath();
+    return configRelativePath === normalizedRelativePath || configRelativePath.startsWith(`${normalizedRelativePath}${path.sep}`);
+  }
+
+  private getProjectConfigRelativePath(): string {
+    return path.normalize(path.relative(this.projectRoot, resolveWritableProjectConfigPath(this.projectRoot, this.host)));
   }
 
   private scheduleFlush(): void {

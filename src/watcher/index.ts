@@ -1,6 +1,9 @@
 import type { CodebaseIndexConfig } from "../config/schema.js";
+import type { HostMode } from "../config/host.js";
+import { resolveWritableProjectConfigPath } from "../config/paths.js";
 import type { Indexer } from "../indexer/index.js";
 import { isGitRepo } from "../git/index.js";
+import { refreshIndexerForDirectory } from "../tools/operations.js";
 import { FileWatcher } from "./file-watcher.js";
 import { GitHeadWatcher } from "./git-head-watcher.js";
 
@@ -61,9 +64,10 @@ class BackgroundReindexer {
 export function createWatcherWithIndexer(
   getIndexer: () => Indexer,
   projectRoot: string,
-  config: CodebaseIndexConfig
+  config: CodebaseIndexConfig,
+  host: HostMode = "opencode",
 ): CombinedWatcher {
-  const fileWatcher = new FileWatcher(projectRoot, config);
+  const fileWatcher = new FileWatcher(projectRoot, config, host);
   const backgroundReindexer = new BackgroundReindexer(async () => {
     await getIndexer().index();
   });
@@ -75,6 +79,10 @@ export function createWatcherWithIndexer(
     const hasDelete = changes.some((c) => c.type === "unlink");
 
     if (hasAddOrChange || hasDelete) {
+      const configPath = pathNormalize(resolveWritableProjectConfigPath(projectRoot, host));
+      if (changes.some((change) => pathNormalize(change.path) === configPath)) {
+        refreshIndexerForDirectory(projectRoot, host);
+      }
       backgroundReindexer.request();
     }
   });
@@ -98,4 +106,8 @@ export function createWatcherWithIndexer(
       gitWatcher?.stop();
     },
   };
+}
+
+function pathNormalize(value: string): string {
+  return value.split("\\").join("/");
 }

@@ -3,18 +3,25 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pathToFileURL } from "url";
 
 import { parseConfig } from "./config/schema.js";
 import { parseHostMode, type HostMode } from "./config/host.js";
 import { handleEvalCommand } from "./eval/cli.js";
 import { Indexer } from "./indexer/index.js";
 import { createMcpServer } from "./mcp-server.js";
-import { loadMergedConfig } from "./config/merger.js";
+import { loadConfigFile, loadMergedConfig } from "./config/merger.js";
 import { getIndexerForProject } from "./tools/operations.js";
 import { hasProjectMarker } from "./utils/files.js";
 import { createWatcherWithIndexer, type CombinedWatcher } from "./watcher/index.js";
 import { attachRecentActivity } from "./tools/visualize/activity.js";
 import { generateVisualizationHtml, transformForVisualization } from "./tools/visualize/index.js";
+
+export interface CliArgs {
+  project: string;
+  config?: string;
+  host: HostMode;
+}
 
 interface VisualizeArgs {
   directory?: string;
@@ -23,7 +30,7 @@ interface VisualizeArgs {
   project: string;
 }
 
-function parseArgs(argv: string[]): { project: string; config?: string; host: HostMode } {
+export function parseArgs(argv: string[]): CliArgs {
   let project = process.cwd();
   let config: string | undefined;
   let host: HostMode = "opencode";
@@ -41,6 +48,10 @@ function parseArgs(argv: string[]): { project: string; config?: string; host: Ho
   }
 
   return { project, config, host };
+}
+
+export function loadCliRawConfig(args: CliArgs): unknown {
+  return args.config ? loadConfigFile(args.config) : loadMergedConfig(args.project, args.host);
 }
 
 function parseVisualizeArgs(argv: string[], cwd: string): VisualizeArgs {
@@ -122,7 +133,7 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(process.argv);
-  const rawConfig = loadMergedConfig(args.project, args.host);
+  const rawConfig = loadCliRawConfig(args);
   const config = parseConfig(rawConfig);
 
   const server = createMcpServer(args.project, config, args.host);
@@ -146,6 +157,7 @@ async function main(): Promise<void> {
       () => getIndexerForProject(args.project, args.host),
       args.project,
       config,
+      args.host,
     );
   }
 
@@ -159,7 +171,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((error: unknown) => {
+function handleMainError(error: unknown): never {
   if (error instanceof Error && error.message.startsWith("Invalid host mode")) {
     console.error("Invalid host mode. Allowed values: opencode, codex.");
     process.exit(1);
@@ -172,4 +184,8 @@ main().catch((error: unknown) => {
 
   console.error("Fatal: failed to start MCP server");
   process.exit(1);
-});
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(handleMainError);
+}

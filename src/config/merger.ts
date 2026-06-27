@@ -111,6 +111,10 @@ function loadJsonFile(filePath: string): unknown {
 
 }
 
+export function loadConfigFile(filePath: string): unknown {
+  return loadJsonFile(filePath);
+}
+
 export function materializeLocalProjectConfig(
   projectRoot: string,
   config: unknown,

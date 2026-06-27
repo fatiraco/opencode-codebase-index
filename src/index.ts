@@ -116,7 +116,7 @@ const plugin: Plugin = async ({ directory, worktree }) => {
     }
 
     if (config.indexing.watchFiles && isValidProject) {
-      replaceActiveWatcher(projectRoot, createWatcherWithIndexer(getProjectIndexer, projectRoot, config));
+      replaceActiveWatcher(projectRoot, createWatcherWithIndexer(getProjectIndexer, projectRoot, config, "opencode"));
     } else {
       replaceActiveWatcher(projectRoot, null);
     }
