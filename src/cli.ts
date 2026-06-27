@@ -13,6 +13,7 @@ import { createMcpServer } from "./mcp-server.js";
 import { loadConfigFile, loadMergedConfig } from "./config/merger.js";
 import { getIndexerForProject } from "./tools/operations.js";
 import { hasProjectMarker } from "./utils/files.js";
+import { startAutoIndex } from "./utils/auto-index.js";
 import { createWatcherWithIndexer, type CombinedWatcher } from "./watcher/index.js";
 import { attachRecentActivity } from "./tools/visualize/activity.js";
 import { generateVisualizationHtml, transformForVisualization } from "./tools/visualize/index.js";
@@ -147,9 +148,7 @@ async function main(): Promise<void> {
 
   if (config.indexing.autoIndex && isValidProject) {
     const indexer = getIndexerForProject(args.project, args.host);
-    indexer.initialize().then(() => {
-      indexer.index().catch(() => {});
-    }).catch(() => {});
+    startAutoIndex(indexer, args.project);
   }
 
   if (config.indexing.watchFiles && isValidProject) {
