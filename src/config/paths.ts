@@ -50,17 +50,8 @@ export function getHostProjectIndexRelativePath(host: HostMode): string {
   return getProjectIndexRelativePath(host);
 }
 
-function hasProjectConfig(projectRoot: string, host: HostMode): boolean {
-  const primaryPath = path.join(projectRoot, getProjectConfigRelativePath(host));
-  if (existsSync(primaryPath)) {
-    return true;
-  }
-
-  if (host !== "opencode") {
-    return existsSync(path.join(projectRoot, OPENCODE_PROJECT_CONFIG_RELATIVE_PATH));
-  }
-
-  return false;
+function hasHostProjectConfig(projectRoot: string, host: HostMode): boolean {
+  return existsSync(path.join(projectRoot, getProjectConfigRelativePath(host)));
 }
 
 export function getGlobalIndexPath(host: HostMode = "opencode"): string {
@@ -157,7 +148,14 @@ export function resolveProjectIndexPath(
     return localIndexPath;
   }
 
-  if (hasProjectConfig(projectRoot, host)) {
+  if (host !== "opencode") {
+    const legacyIndexPath = path.join(projectRoot, OPENCODE_PROJECT_INDEX_RELATIVE_PATH);
+    if (existsSync(legacyIndexPath) && !hasHostProjectConfig(projectRoot, host)) {
+      return legacyIndexPath;
+    }
+  }
+
+  if (hasHostProjectConfig(projectRoot, host)) {
     return localIndexPath;
   }
 

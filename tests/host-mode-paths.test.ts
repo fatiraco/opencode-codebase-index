@@ -120,6 +120,33 @@ describe("host-aware path resolution", () => {
     );
   });
 
+  it("falls back to local legacy project index when codex host has only OpenCode project state", () => {
+    fs.mkdirSync(path.join(mainRepoDir, ".opencode", "index"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mainRepoDir, ".opencode", "codebase-index.json"),
+      JSON.stringify({ knowledgeBases: ["legacy-docs"] }, null, 2),
+      "utf-8",
+    );
+
+    expect(resolveProjectIndexPath(mainRepoDir, "project", "codex")).toBe(
+      path.join(mainRepoDir, ".opencode", "index"),
+    );
+  });
+
+  it("uses codex project index when codex-native config exists next to a legacy index", () => {
+    fs.mkdirSync(path.join(mainRepoDir, ".opencode", "index"), { recursive: true });
+    fs.mkdirSync(path.join(mainRepoDir, ".codebase-index"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mainRepoDir, ".codebase-index", "config.json"),
+      JSON.stringify({ knowledgeBases: ["codex-docs"] }, null, 2),
+      "utf-8",
+    );
+
+    expect(resolveProjectIndexPath(mainRepoDir, "project", "codex")).toBe(
+      path.join(mainRepoDir, ".codebase-index", "index"),
+    );
+  });
+
   it("prefers codex-index inheritance before legacy when both exist", () => {
     fs.mkdirSync(path.join(mainRepoDir, ".codebase-index", "index"), { recursive: true });
     fs.mkdirSync(path.join(mainRepoDir, ".opencode", "index"), { recursive: true });
