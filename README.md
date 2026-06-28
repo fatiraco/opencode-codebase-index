@@ -101,7 +101,7 @@ Install once for Claude Code sessions and get skill guidance plus MCP tools in o
 The plugin includes:
 - `skills/` guidance for local workflows
 - `hooks/hooks.json` lightweight session-start guidance
-- inline `mcpServers` (in `.claude-plugin/plugin.json`) launching `dist/cli.js --host claude` via `${CLAUDE_PLUGIN_ROOT}`
+- inline `mcpServers` (in `.claude-plugin/plugin.json`) running the published `opencode-codebase-index` CLI via `npx … --host claude`, so a git marketplace install works without a local build
 - `.claude-plugin/marketplace.json` so this repo can act as a Claude Code marketplace source
 
 ### Provider selection notes

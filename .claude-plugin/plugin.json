@@ -22,8 +22,8 @@
   "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "codebase-index": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "--host", "claude"]
+      "command": "npx",
+      "args": ["-y", "--package", "opencode-codebase-index", "opencode-codebase-index-mcp", "--host", "claude"]
     }
   }
 }
