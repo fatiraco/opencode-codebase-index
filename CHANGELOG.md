@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex marketplace install**: Run the Codex MCP server through the published npm CLI via `npx` so git marketplace installs no longer depend on gitignored local `dist/` artifacts (#140).
+
 ## [0.12.0] - 2026-06-22
 
 ### Added
