@@ -1,53 +1,123 @@
-name: Build
+name: Create Windows Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag della release, ad esempio v1.0.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Pubblica come prerelease"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
+  release:
+    name: Build and release Windows x64
+    runs-on: windows-latest
 
-    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: 22
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native -> target
-          key: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build native module
-        working-directory: native
-        run: npx napi build --release --platform --target ${{ matrix.target }}
+      - name: Build native module for Windows x64
+        run: npx napi build --release --platform --target x86_64-pc-windows-msvc
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-${{ matrix.target }}
-          path: native/*.node
-          if-no-files-found: error
+      - name: Build JavaScript bundle
+        run: npm run build
 
+      - name: Prepare portable plugin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $releaseRoot = "release"
+          $pluginDir = Join-Path $releaseRoot "plugins"
+          $bundleSource = "dist/index.js"
+          $bundleTarget = Join-Path $pluginDir "opencode-codebase-index.js"
+          $nativeName = "codebase-index-native.win32-x64-msvc.node"
+
+          Remove-Item $releaseRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+
+          if (-not (Test-Path $bundleSource)) {
+            throw "Bundle JavaScript non trovato: $bundleSource"
+          }
+
+          $nativeSource = Get-ChildItem -Path . -Recurse -File -Filter $nativeName |
+            Where-Object { $_.FullName -notlike "*\release\*" } |
+            Select-Object -First 1
+
+          if (-not $nativeSource) {
+            throw "Modulo nativo non trovato: $nativeName"
+          }
+
+          Copy-Item $bundleSource $bundleTarget
+          Copy-Item $nativeSource.FullName (Join-Path $pluginDir $nativeName)
+
+          @"
+          opencode-codebase-index - Windows x64
+
+          Installazione:
+          1. Copiare il contenuto della cartella plugins nella cartella globale plugins di OpenCode.
+          2. Rimuovere da opencode.json il riferimento npm o file:/// al plugin originale.
+          3. Riavviare OpenCode.
+
+          File:
+          - opencode-codebase-index.js
+          - codebase-index-native.win32-x64-msvc.node
+          "@ | Set-Content -Path (Join-Path $releaseRoot "INSTALL.txt") -Encoding UTF8
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zipName = "opencode-codebase-index-${{ inputs.tag }}-windows-x64.zip"
+
+          Remove-Item $zipName -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
+
+          if (-not (Test-Path $zipName)) {
+            throw "Creazione ZIP fallita: $zipName"
+          }
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zipName = "opencode-codebase-index-$env:RELEASE_TAG-windows-x64.zip"
+          $prereleaseOption = @()
+
+          if ($env:IS_PRERELEASE -eq "true") {
+            $prereleaseOption = @("--prerelease")
+          }
+
+          gh release create $env:RELEASE_TAG `
+            $zipName `
+            --target "${{ github.sha }}" `
+            --title "opencode-codebase-index $env:RELEASE_TAG - Windows x64" `
+            --generate-notes `
+            @prereleaseOption
