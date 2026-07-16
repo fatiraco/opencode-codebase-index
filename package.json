@@ -1,7 +1,7 @@
 {
   "name": "opencode-codebase-index",
-  "version": "0.14.0",
-  "description": "Semantic codebase indexing and search for OpenCode - find code by meaning, not just keywords",
+  "version": "14.1.0",
+  "description": "Plugin minimale per la ricerca semantica del codebase in OpenCode su Windows x64",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -12,68 +12,27 @@
       "require": "./dist/index.cjs"
     }
   },
-  "bin": {
-    "opencode-codebase-index-mcp": "dist/cli.js"
-  },
   "license": "MIT",
-  "author": "Kenneth",
+  "author": "Fabrizio Tiracorrendo",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Helweg/opencode-codebase-index"
+    "url": "https://github.com/fatiraco/opencode-codebase-index.git"
   },
-  "keywords": [
-    "opencode",
-    "semantic-search",
-    "codebase-indexing",
-    "vector-search",
-    "embeddings",
-    "tree-sitter",
-    "ai-coding",
-    "pi-package",
-    "pi"
-  ],
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
     "build": "npm run build:ts && npm run build:native",
     "build:ts": "tsup",
-    "build:native": "cd native && cargo build --release && napi build --release --platform",
-    "build:native:all": "cd native && napi build --release --platform --target x86_64-apple-darwin --target aarch64-apple-darwin --target x86_64-unknown-linux-gnu --target aarch64-unknown-linux-gnu --target x86_64-pc-windows-msvc",
-    "visualize": "node dist/cli.js visualize",
+    "build:native": "cd native && napi build --release --platform --target x86_64-pc-windows-msvc",
     "dev": "tsup --watch",
-    "eval": "npx tsx src/cli.ts eval run",
-    "eval:smoke": "npx tsx src/cli.ts eval run --config .github/eval-config.json --reindex --dataset benchmarks/golden/small.json",
-    "eval:ci": "npx tsx src/cli.ts eval run --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json",
-    "eval:ci:ollama": "npx tsx src/cli.ts eval run --config .github/eval-ollama-config.json --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json",
-    "eval:compare": "npx tsx src/cli.ts eval compare",
-    "dev:link-mcp": "node scripts/link-local-mcp-bin.mjs",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test": "vitest run",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "typecheck": "tsc --noEmit"
   },
-  "files": [
-    "dist",
-    "native/*.node",
-    "skill",
-    "commands",
-    "scripts/link-local-mcp-bin.mjs",
-    ".codex-plugin",
-    ".claude-plugin",
-    ".mcp.json",
-    "skills",
-    "hooks"
-  ],
   "napi": {
     "binaryName": "codebase-index-native",
     "targets": [
-      "x86_64-apple-darwin",
-      "aarch64-apple-darwin",
-      "x86_64-unknown-linux-gnu",
-      "aarch64-unknown-linux-gnu",
       "x86_64-pc-windows-msvc"
     ]
   },
@@ -89,11 +48,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.2",
     "@eslint/js": "^9.39.4",
     "@napi-rs/cli": "^3.6.0",
     "@types/node": "^25.5.2",
-    "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^9.39.4",
     "tsup": "^8.1.0",
     "typescript": "^5.9.3",
@@ -111,25 +68,5 @@
     "qs": "6.15.2",
     "vite": "8.0.16",
     "esbuild": "0.28.1"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@opencode-ai/plugin": "^1.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@opencode-ai/plugin": {
-      "optional": true
-    },
-    "@earendil-works/pi-coding-agent": {
-      "optional": true
-    }
-  },
-  "pi": {
-    "extensions": [
-      "./dist/pi-extension.js"
-    ],
-    "skills": [
-      "./skills"
-    ]
   }
 }
