@@ -53,19 +53,20 @@ jobs:
 
           $releaseRoot = "release"
           $pluginDir = Join-Path $releaseRoot "plugins"
+          $nativeDir = Join-Path $releaseRoot "native"
           $bundleSource = "dist/index.js"
           $bundleTarget = Join-Path $pluginDir "opencode-codebase-index.js"
           $nativeName = "codebase-index-native.win32-x64-msvc.node"
 
           Remove-Item $releaseRoot -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $nativeDir -Force | Out-Null
 
           if (-not (Test-Path $bundleSource)) {
             throw "Bundle JavaScript non trovato: $bundleSource"
           }
 
-          $nativeSource = Get-ChildItem -Path . -Recurse -File -Filter $nativeName |
-            Where-Object { $_.FullName -notlike "*\release\*" } |
+          $nativeSource = Get-ChildItem -Path "native" -Recurse -File -Filter $nativeName |
             Select-Object -First 1
 
           if (-not $nativeSource) {
@@ -73,26 +74,27 @@ jobs:
           }
 
           Copy-Item $bundleSource $bundleTarget
-          Copy-Item $nativeSource.FullName (Join-Path $pluginDir $nativeName)
+          Copy-Item $nativeSource.FullName (Join-Path $nativeDir $nativeName)
 
           @"
           opencode-codebase-index - Windows x64
 
           Installazione:
-          1. Copiare il contenuto della cartella plugins nella cartella globale plugins di OpenCode.
-          2. Rimuovere da opencode.json il riferimento npm o file:/// al plugin originale.
-          3. Riavviare OpenCode.
-
-          File:
-          - opencode-codebase-index.js
-          - codebase-index-native.win32-x64-msvc.node
+          1. Estrarre il contenuto dello ZIP nella cartella di configurazione globale di OpenCode.
+          2. Verificare la presenza di:
+             plugins/opencode-codebase-index.js
+             native/codebase-index-native.win32-x64-msvc.node
+          3. Rimuovere da opencode.json il riferimento npm o file:/// al plugin originale.
+          4. Riavviare OpenCode.
           "@ | Set-Content -Path (Join-Path $releaseRoot "INSTALL.txt") -Encoding UTF8
 
       - name: Create ZIP
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           $ErrorActionPreference = "Stop"
-          $zipName = "opencode-codebase-index-${{ inputs.tag }}-windows-x64.zip"
+          $zipName = "opencode-codebase-index-$env:RELEASE_TAG-windows-x64.zip"
 
           Remove-Item $zipName -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
@@ -110,15 +112,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $zipName = "opencode-codebase-index-$env:RELEASE_TAG-windows-x64.zip"
-          $prereleaseOption = @()
+          $arguments = @(
+            "release",
+            "create",
+            $env:RELEASE_TAG,
+            $zipName,
+            "--target",
+            "${{ github.sha }}",
+            "--title",
+            "opencode-codebase-index $env:RELEASE_TAG - Windows x64",
+            "--generate-notes"
+          )
 
           if ($env:IS_PRERELEASE -eq "true") {
-            $prereleaseOption = @("--prerelease")
+            $arguments += "--prerelease"
           }
 
-          gh release create $env:RELEASE_TAG `
-            $zipName `
-            --target "${{ github.sha }}" `
-            --title "opencode-codebase-index $env:RELEASE_TAG - Windows x64" `
-            --generate-notes `
-            @prereleaseOption
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "Creazione della release GitHub fallita"
+          }
