@@ -126,6 +126,22 @@ export interface CustomProviderConfig {
   max_batch_size?: number;
 }
 
+
+export interface SymbolIndexingRule {
+  /** Project-relative file path. Forward and backward slashes are accepted. */
+  file: string;
+  /** Symbols to retain from the parsed file. */
+  include: string[];
+  /** Also retain chunks contained in a selected symbol range. Default: true. */
+  includeChildren: boolean;
+  /** Reserved for dependency expansion. Only false is currently supported. */
+  includeReferencedSymbols: boolean;
+}
+
+export interface SymbolIndexingConfig {
+  rules: SymbolIndexingRule[];
+}
+
 export interface CodebaseIndexConfig {
   embeddingProvider: EmbeddingProvider | 'custom' | 'auto';
   embeddingModel?: EmbeddingModelName;
@@ -145,6 +161,8 @@ export interface CodebaseIndexConfig {
   exclude: string[];
   /** Additional file patterns to include (extends defaults) */
   additionalInclude?: string[];
+  /** Optional per-file rules that restrict indexing to selected symbols. */
+  symbolIndexing?: SymbolIndexingConfig;
 }
 
 export type ParsedCodebaseIndexConfig = CodebaseIndexConfig & {
@@ -154,6 +172,7 @@ export type ParsedCodebaseIndexConfig = CodebaseIndexConfig & {
   reranker?: RerankerConfig;
   knowledgeBases: string[];
   additionalInclude: string[];
+  symbolIndexing: SymbolIndexingConfig;
 };
 
 export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
@@ -230,6 +249,49 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
       .filter(p => typeof p === "string" && p.trim().length > 0)
       .map(p => p.trim())
     : [];
+
+
+  const rawSymbolIndexing = input.symbolIndexing;
+  const symbolIndexing: SymbolIndexingConfig = { rules: [] };
+  if (rawSymbolIndexing !== undefined) {
+    if (!rawSymbolIndexing || typeof rawSymbolIndexing !== "object" || Array.isArray(rawSymbolIndexing)) {
+      throw new Error("symbolIndexing must be an object.");
+    }
+    const rawRules = (rawSymbolIndexing as Record<string, unknown>).rules;
+    if (!Array.isArray(rawRules)) {
+      throw new Error("symbolIndexing.rules must be an array.");
+    }
+    symbolIndexing.rules = rawRules.map((rawRule, index): SymbolIndexingRule => {
+      if (!rawRule || typeof rawRule !== "object" || Array.isArray(rawRule)) {
+        throw new Error(`symbolIndexing.rules[${index}] must be an object.`);
+      }
+      const rule = rawRule as Record<string, unknown>;
+      const file = typeof rule.file === "string" ? rule.file.trim() : "";
+      if (!file) {
+        throw new Error(`symbolIndexing.rules[${index}].file must be a non-empty string.`);
+      }
+      if (!isStringArray(rule.include) || rule.include.length === 0) {
+        throw new Error(`symbolIndexing.rules[${index}].include must contain at least one symbol name.`);
+      }
+      const include = [...new Set(rule.include.map((name) => name.trim()).filter(Boolean))];
+      if (include.length === 0) {
+        throw new Error(`symbolIndexing.rules[${index}].include must contain at least one non-empty symbol name.`);
+      }
+      const includeReferencedSymbols = rule.includeReferencedSymbols === true;
+      if (includeReferencedSymbols) {
+        throw new Error(
+          `symbolIndexing.rules[${index}].includeReferencedSymbols=true is not yet supported. ` +
+          "Add referenced symbols explicitly to symbolIndexing.rules instead.",
+        );
+      }
+      return {
+        file: file.replace(/\\/g, "/").replace(/^\.\//, ""),
+        include,
+        includeChildren: rule.includeChildren !== false,
+        includeReferencedSymbols,
+      };
+    });
+  }
 
   let embeddingProvider: EmbeddingProvider | 'custom' | 'auto';
   let embeddingModel: EmbeddingModelName | undefined;
@@ -333,6 +395,7 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     debug,
     reranker,
     knowledgeBases,
+    symbolIndexing,
   };
 }
 

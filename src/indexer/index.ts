@@ -42,6 +42,49 @@ import { getChangedFiles } from "../tools/changed-files.js";
 import type { PrImpactResult } from "./pr-impact-types.js";
 import { getChunkGitBlame, type GitBlameMetadata } from "./git-blame.js";
 
+
+function normalizeRulePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function applySymbolIndexingRule(
+  projectRoot: string,
+  parsed: { path: string; chunks: import("../native/index.js").CodeChunk[] },
+  rules: ParsedCodebaseIndexConfig["symbolIndexing"]["rules"],
+  logger: Logger,
+): import("../native/index.js").CodeChunk[] {
+  if (rules.length === 0) {
+    return parsed.chunks;
+  }
+
+  const relativePath = normalizeRulePath(path.relative(projectRoot, parsed.path));
+  const rule = rules.find((candidate) => normalizeRulePath(candidate.file) === relativePath);
+  if (!rule) {
+    return parsed.chunks;
+  }
+
+  const requestedNames = new Set(rule.include);
+  const selectedSymbols = parsed.chunks.filter(
+    (chunk) => chunk.name !== undefined && requestedNames.has(chunk.name),
+  );
+  const foundNames = new Set(selectedSymbols.map((chunk) => chunk.name as string));
+  const missingNames = rule.include.filter((name) => !foundNames.has(name));
+  if (missingNames.length > 0) {
+    logger.warn("Configured symbols were not found", {
+      file: relativePath,
+      symbols: missingNames,
+    });
+  }
+
+  if (!rule.includeChildren) {
+    return selectedSymbols;
+  }
+
+  return parsed.chunks.filter((chunk) => selectedSymbols.some(
+    (symbol) => chunk.startLine >= symbol.startLine && chunk.endLine <= symbol.endLine,
+  ));
+}
+
 export const CALL_GRAPH_LANGUAGES = new Set(["typescript", "tsx", "javascript", "jsx", "python", "go", "rust", "php", "apex", "zig", "gdscript", "matlab", "bash"]);
 // Languages whose identifiers are case-insensitive at the language level.
 // The Rust call_extractor lowercases callee names for these languages (except
@@ -3411,7 +3454,12 @@ export class Indexer {
       }
 
       let fileChunkCount = 0;
-      let chunksToProcess = parsed.chunks;
+      let chunksToProcess = applySymbolIndexingRule(
+        this.projectRoot,
+        parsed,
+        this.config.symbolIndexing.rules,
+        this.logger,
+      );
 
       if (this.config.indexing.fallbackToTextOnMaxChunks && chunksToProcess.length > this.config.indexing.maxChunksPerFile) {
         const changedFile = changedFiles.find(f => f.path === parsed.path);
