@@ -28,6 +28,13 @@ const configCache = new Map<IndexerCacheKey, ParsedCodebaseIndexConfig>();
 const defaultProjectRoots = new Map<HostMode, string>();
 
 function getProjectRoot(projectRoot: string | undefined, host: HostMode): string {
+  if (process.platform === "win32" && projectRoot === "/") {
+    const root = defaultProjectRoots.get(host);
+    if (root) {
+      return root;
+    }
+  }
+
   if (projectRoot) {
     return projectRoot;
   }

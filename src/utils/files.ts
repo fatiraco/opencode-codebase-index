@@ -57,9 +57,6 @@ export function createIgnoreFilter(projectRoot: string): Ignore {
     "vendor",
     ".opencode",
     ".codebase-index",
-    ".*",
-    "**/.*",
-    "**/.*/**",
     "**/*build*/**",
   ];
 

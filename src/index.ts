@@ -82,10 +82,75 @@ interface ChatTransformOutput {
 }
 
 const plugin: Plugin = async ({ directory, worktree }) => {
+  const __codebaseIndexDebugLogPath = process.env.CODEBASE_INDEX_PLUGIN_DEBUG_LOG
+    || "E:/Programmazione/.opencode/debug/codebase-index-plugin.log";
+  const __codebaseIndexDebugLog = async (message: string, data: Record<string, unknown> = {}) => {
+    try {
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      fs.mkdirSync(pathModule.dirname(__codebaseIndexDebugLogPath), { recursive: true });
+      fs.appendFileSync(
+        __codebaseIndexDebugLogPath,
+        `[${new Date().toISOString()}] ${message} ${JSON.stringify(data, null, 2)}\n`,
+        "utf-8",
+      );
+    } catch {
+      // Diagnostic logging must never block plugin startup.
+    }
+  };
+
   try {
-    const projectRoot = worktree || directory;
+    await __codebaseIndexDebugLog("plugin input", {
+      directory,
+      worktree,
+      processCwd: process.cwd(),
+      homeDir: os.homedir(),
+      platform: process.platform,
+      argv: process.argv,
+      env: {
+        OPENCODE_CONFIG: process.env.OPENCODE_CONFIG,
+        OPENCODE_HOME: process.env.OPENCODE_HOME,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+        XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+        XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+        XDG_STATE_HOME: process.env.XDG_STATE_HOME,
+        PATH: process.env.PATH,
+      },
+    });
+
+    let projectRoot = worktree || directory;
+    if (process.platform === "win32" && worktree === "/" && directory) {
+      projectRoot = directory;
+    }
+
+    await __codebaseIndexDebugLog("project root selected", {
+      projectRoot,
+      resolvedProjectRoot: projectRoot ? path.resolve(projectRoot) : null,
+      selectedFrom: worktree ? "worktree" : directory ? "directory" : "none",
+      processCwd: process.cwd(),
+      projectConfigPath: projectRoot ? path.join(projectRoot, ".opencode", "codebase-index.json") : null,
+      globalConfigPathCandidate: path.join(os.homedir(), ".config", "opencode", "codebase-index.json"),
+    });
+
     const rawConfig = loadMergedConfig(projectRoot);
+    await __codebaseIndexDebugLog("raw config loaded", {
+      projectRoot,
+      rawConfigKeys: rawConfig && typeof rawConfig === "object" ? Object.keys(rawConfig) : [],
+      rawConfig,
+    });
+
     const config = parseConfig(rawConfig);
+    await __codebaseIndexDebugLog("parsed config", {
+      embeddingProvider: config.embeddingProvider,
+      embeddingModel: config.embeddingModel,
+      customProvider: config.customProvider
+        ? { ...config.customProvider, apiKey: config.customProvider.apiKey ? "***" : undefined }
+        : undefined,
+      scope: config.scope,
+      indexing: config.indexing,
+      knowledgeBases: config.knowledgeBases,
+      additionalInclude: config.additionalInclude,
+    });
 
     initializeTools(projectRoot, config);
 
@@ -95,7 +160,16 @@ const plugin: Plugin = async ({ directory, worktree }) => {
       : null;
 
     const isHomeDir = path.resolve(projectRoot) === path.resolve(os.homedir());
-    const isValidProject = !isHomeDir && (!config.indexing.requireProjectMarker || hasProjectMarker(projectRoot));
+    const hasMarker = hasProjectMarker(projectRoot);
+    const isValidProject = !isHomeDir && (!config.indexing.requireProjectMarker || hasMarker);
+    await __codebaseIndexDebugLog("project validation", {
+      projectRoot,
+      resolvedProjectRoot: path.resolve(projectRoot),
+      isHomeDir,
+      requireProjectMarker: config.indexing.requireProjectMarker,
+      hasProjectMarker: hasMarker,
+      isValidProject,
+    });
 
     if (isHomeDir) {
       console.warn(

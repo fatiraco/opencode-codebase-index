@@ -30,8 +30,6 @@ export const DEFAULT_EXCLUDE = [
   "**/.next/**",
   "**/.nuxt/**",
   "**/.opencode/**",
-  "**/.*",
-  "**/.*/**",
 ];
 
 export const EMBEDDING_MODELS = {

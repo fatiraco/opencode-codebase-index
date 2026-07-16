@@ -5,7 +5,7 @@ export function normalizePathSeparators(value: string): string {
 }
 
 export function isHiddenPathSegment(part: string): boolean {
-  return part.startsWith(".") && part !== "." && part !== "..";
+  return part.startsWith(".") && part !== "." && part !== ".." && part.toLowerCase() !== ".github";
 }
 
 export function isBuildPathSegment(part: string): boolean {
