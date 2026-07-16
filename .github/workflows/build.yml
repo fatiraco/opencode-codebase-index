@@ -40,10 +40,11 @@ jobs:
         run: npm ci
 
       - name: Build native module for Windows x64
+        working-directory: native
         run: npx napi build --release --platform --target x86_64-pc-windows-msvc
 
       - name: Build JavaScript bundle
-        run: npm run build
+        run: npm run build:ts
 
       - name: Prepare portable plugin
         shell: pwsh
