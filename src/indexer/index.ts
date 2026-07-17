@@ -3325,19 +3325,37 @@ export class Indexer {
     const unchangedFilePaths = new Set<string>();
     const currentFileHashes = new Map<string, string>();
 
-    for (const f of files) {
-      const currentHash = hashFile(f.path);
-      currentFileHashes.set(f.path, currentHash);
+	for (const f of files) {
+	    if (!existsSync(f.path)) {
+	        this.logger.warn("Skipping file that no longer exists", {
+	            filePath: f.path,
+	        })
+	        continue
+	    }
 
-      if (this.fileHashCache.get(f.path) === currentHash) {
-        unchangedFilePaths.add(f.path);
-        this.logger.recordCacheHit();
-      } else {
-        const content = await fsPromises.readFile(f.path, "utf-8");
-        changedFiles.push({ path: f.path, content, hash: currentHash });
-        this.logger.recordCacheMiss();
-      }
-    }
+	    try {
+	        const currentHash = hashFile(f.path)
+	        currentFileHashes.set(f.path, currentHash)
+
+	        if (this.fileHashCache.get(f.path) === currentHash) {
+	            unchangedFilePaths.add(f.path)
+	            this.logger.recordCacheHit()
+	        } else {
+	            const content = await fsPromises.readFile(f.path, "utf-8")
+	            changedFiles.push({
+	                path: f.path,
+	                content,
+	                hash: currentHash,
+	            })
+	            this.logger.recordCacheMiss()
+	        }
+	    } catch (error) {
+	        this.logger.warn("Skipping file that cannot be read during indexing", {
+	            filePath: f.path,
+	            error: error instanceof Error ? error.message : String(error),
+	        })
+	    }
+	}
 
     this.logger.cache("info", "File hash cache results", {
       unchanged: unchangedFilePaths.size,
