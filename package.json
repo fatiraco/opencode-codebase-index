@@ -1,6 +1,6 @@
 {
   "name": "opencode-codebase-index",
-  "version": "14.1.0",
+  "version": "14.2.0",
   "description": "Plugin minimale per la ricerca semantica del codebase in OpenCode su Windows x64",
   "type": "module",
   "main": "dist/index.js",

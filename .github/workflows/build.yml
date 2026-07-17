@@ -3,15 +3,15 @@ name: Create Windows Release
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag della release, ad esempio v1.0.0"
+      version_increment:
+        description: "Parte della versione da incrementare"
         required: true
-        type: string
-      prerelease:
-        description: "Pubblica come prerelease"
-        required: false
-        default: false
-        type: boolean
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,6 +37,38 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Configure Git
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Increment version
+        id: version
+        shell: pwsh
+        env:
+          VERSION_INCREMENT: ${{ inputs.version_increment }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          npm version $env:VERSION_INCREMENT --no-git-tag-version
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Incremento della versione non riuscito"
+          }
+
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+
+          git fetch --tags --force
+          $existingTag = git tag --list $tag
+          if ($existingTag) {
+            throw "Il tag $tag esiste gia'"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm ci
@@ -78,6 +112,7 @@ jobs:
 
           @"
           opencode-codebase-index - Windows x64
+          Versione: ${{ steps.version.outputs.version }}
 
           Installazione:
           1. Estrarre il contenuto dello ZIP nella cartella di configurazione globale di OpenCode.
@@ -91,7 +126,7 @@ jobs:
       - name: Create ZIP
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           $ErrorActionPreference = "Stop"
           $zipName = "opencode-codebase-index-$env:RELEASE_TAG-windows-x64.zip"
@@ -103,12 +138,31 @@ jobs:
             throw "Creazione ZIP fallita: $zipName"
           }
 
+      - name: Commit version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          git add package.json package-lock.json
+          git commit -m "chore: release $env:RELEASE_TAG"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Commit della versione non riuscito"
+          }
+
+          git push origin "HEAD:${{ github.ref_name }}"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Push della nuova versione non riuscito"
+          }
+
       - name: Create GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          IS_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           $ErrorActionPreference = "Stop"
           $zipName = "opencode-codebase-index-$env:RELEASE_TAG-windows-x64.zip"
@@ -118,17 +172,14 @@ jobs:
             $env:RELEASE_TAG,
             $zipName,
             "--target",
-            "${{ github.sha }}",
+            "${{ github.ref_name }}",
             "--title",
             "opencode-codebase-index $env:RELEASE_TAG - Windows x64",
             "--generate-notes"
           )
 
-          if ($env:IS_PRERELEASE -eq "true") {
-            $arguments += "--prerelease"
-          }
-
           & gh @arguments
+
           if ($LASTEXITCODE -ne 0) {
             throw "Creazione della release GitHub fallita"
           }
